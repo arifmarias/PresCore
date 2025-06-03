@@ -1,0 +1,27 @@
+# MedScript Pro - Python Dependencies
+
+# Core Framework
+streamlit
+
+# Database
+SQLAlchemy  # Built-in with Python
+
+# Data Processing
+pandas
+numpy
+
+# PDF Generation
+fpdf2
+
+# Visualization
+plotly
+
+# QR Code Generation
+qrcode
+pillow
+
+# HTTP Requests for AI API
+requests
+
+# Date and Time Utilities
+python-dateutil
