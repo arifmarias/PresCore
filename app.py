@@ -821,35 +821,81 @@ def show_user_management():
     tab1, tab2 = st.tabs(["View Users", "Add User"])
     
     with tab1:
+        st.subheader("View and Manage Users")
         conn = db_manager.get_connection()
         users_df = pd.read_sql("""
             SELECT id, username, full_name, user_type, medical_license, specialization, 
-                   email, phone, created_at, is_active
+                   email, phone, created_at, DATETIME(created_at, '+5 hours', '+30 minutes') as created_at_ist, is_active
             FROM users
             ORDER BY created_at DESC
         """, conn)
         conn.close()
-        
+
         if not users_df.empty:
             # Search and filter
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                search_term = st.text_input("Search users...")
-            with col2:
-                user_type_filter = st.selectbox("Filter by role", ["All", "super_admin", "doctor", "assistant"])
-            
+            col_search, col_filter_role, col_filter_status = st.columns([2,1,1])
+            with col_search:
+                search_term = st.text_input("Search users (name, username, email)...", key="user_search")
+            with col_filter_role:
+                user_type_filter = st.selectbox("Filter by role", ["All", "super_admin", "doctor", "assistant"], key="user_role_filter")
+            with col_filter_status:
+                status_filter = st.selectbox("Filter by status", ["All", "Active", "Inactive"], key="user_status_filter")
+
             # Apply filters
             filtered_df = users_df.copy()
             if search_term:
                 filtered_df = filtered_df[
                     filtered_df['full_name'].str.contains(search_term, case=False, na=False) |
-                    filtered_df['username'].str.contains(search_term, case=False, na=False)
+                    filtered_df['username'].str.contains(search_term, case=False, na=False) |
+                    filtered_df['email'].str.contains(search_term, case=False, na=False)
                 ]
             
             if user_type_filter != "All":
                 filtered_df = filtered_df[filtered_df['user_type'] == user_type_filter]
-            
-            st.dataframe(filtered_df, use_container_width=True)
+
+            if status_filter == "Active":
+                filtered_df = filtered_df[filtered_df['is_active'] == 1]
+            elif status_filter == "Inactive":
+                filtered_df = filtered_df[filtered_df['is_active'] == 0]
+
+            # Display users with action buttons
+            for index, row in filtered_df.iterrows():
+                st.markdown("---")
+                col1, col2, col3 = st.columns([3, 1, 1])
+                with col1:
+                    st.markdown(f"**{row['full_name']}** ({row['username']})")
+                    st.caption(f"ID: {row['id']} | Role: {row['user_type'].replace('_', ' ').title()} | Email: {row['email']}")
+                    st.caption(f"Phone: {row['phone']} | License: {row['medical_license']} | Specialization: {row['specialization']}")
+                    status_text = "Active" if row['is_active'] else "Inactive"
+                    status_color = "green" if row['is_active'] else "red"
+                    st.caption(f"Status: <span style='color:{status_color};'>{status_text}</span> | Created: {row['created_at_ist']}", unsafe_allow_html=True)
+
+                with col2:
+                    if st.button("Edit", key=f"edit_user_{row['id']}", use_container_width=True):
+                        st.session_state.edit_user_id = row['id']
+                        # This will trigger the edit form to show below or in a modal/expander
+
+                with col3:
+                    # Prevent super_admin from deleting themselves
+                    if st.session_state.user['id'] == row['id'] and row['user_type'] == 'super_admin':
+                        st.button("Delete", key=f"delete_user_{row['id']}", disabled=True, use_container_width=True, help="Super Admins cannot delete their own account.")
+                    else:
+                        if st.button("⚠️ Delete" if row['is_active'] else "✅ Restore", key=f"delete_user_{row['id']}", use_container_width=True):
+                            st.session_state.delete_user_id = row['id']
+                            st.session_state.action_user_active_status = row['is_active']
+                            # This will trigger confirmation and action
+
+            if not filtered_df.empty:
+                 st.markdown("---") # Final separator
+
+            # Handle Edit User action
+            if 'edit_user_id' in st.session_state and st.session_state.edit_user_id:
+                show_edit_user_form(st.session_state.edit_user_id)
+
+            # Handle Delete/Restore User action
+            if 'delete_user_id' in st.session_state and st.session_state.delete_user_id:
+                confirm_and_delete_user(st.session_state.delete_user_id, st.session_state.action_user_active_status)
+
         else:
             st.info("No users found")
     
@@ -905,50 +951,105 @@ def show_user_management():
 def show_patient_management():
     st.markdown('<div class="main-header"><h1>👤 Patient Management</h1></div>', unsafe_allow_html=True)
     
+    # Role check for edit/delete capabilities
+    can_manage_patients = st.session_state.user['user_type'] in ['super_admin', 'doctor']
+
     tab1, tab2 = st.tabs(["View Patients", "Add Patient"])
     
     with tab1:
-        conn = db_manager.get_connection()
-        patients_df = pd.read_sql("""
-            SELECT patient_id, first_name, last_name, date_of_birth, gender, phone, 
-                   allergies, medical_conditions, created_at
+        st.subheader("View and Manage Patients")
+
+        # Filters: Search, Status
+        col_search, col_filter_status = st.columns([2,1])
+        with col_search:
+            search_term = st.text_input("Search patients (name, ID, email, phone)...", key="patient_search")
+        with col_filter_status:
+            patient_status_filter = st.selectbox("Filter by status", ["Active", "Inactive", "All"], key="patient_status_filter", index=0)
+
+        # Build query based on status filter
+        query = """
+            SELECT id, patient_id, first_name, last_name, date_of_birth, gender, phone, email, address,
+                   allergies, medical_conditions, emergency_contact, insurance_info,
+                   created_at, DATETIME(created_at, '+5 hours', '+30 minutes') as created_at_ist, is_active
             FROM patients
-            WHERE is_active = 1
-            ORDER BY created_at DESC
-        """, conn)
+        """
+        params = []
+
+        if patient_status_filter == "Active":
+            query += " WHERE is_active = 1"
+        elif patient_status_filter == "Inactive":
+            query += " WHERE is_active = 0"
+        # For "All", no WHERE clause for is_active is added initially
+
+        # Apply search term
+        if search_term:
+            like_term = f"%{search_term}%"
+            search_clause = """
+                (first_name LIKE ? OR last_name LIKE ? OR patient_id LIKE ? OR email LIKE ? OR phone LIKE ?)
+            """
+            if "WHERE" in query:
+                query += f" AND {search_clause}"
+            else:
+                query += f" WHERE {search_clause}"
+            params.extend([like_term] * 5)
+
+        query += " ORDER BY created_at DESC"
+
+        conn = db_manager.get_connection()
+        patients_df = pd.read_sql(query, conn, params=params)
         conn.close()
         
         if not patients_df.empty:
-            # Search functionality
-            search_term = st.text_input("Search patients by name or ID...")
-            
-            if search_term:
-                patients_df = patients_df[
-                    patients_df['patient_id'].str.contains(search_term, case=False, na=False) |
-                    patients_df['first_name'].str.contains(search_term, case=False, na=False) |
-                    patients_df['last_name'].str.contains(search_term, case=False, na=False)
-                ]
-            
-            # Display patients with actions
-            for _, patient in patients_df.iterrows():
-                with st.expander(f"👤 {patient['first_name']} {patient['last_name']} ({patient['patient_id']})"):
-                    col1, col2 = st.columns(2)
+            for index, patient in patients_df.iterrows():
+                st.markdown("---")
+
+                status_text = "Active" if patient['is_active'] else "Inactive"
+                status_color = "green" if patient['is_active'] else "red"
+                expander_title = f"👤 {patient['first_name']} {patient['last_name']} ({patient['patient_id']}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>"
+
+                with st.expander(expander_title, unsafe_allow_html=True):
+                    col_details, col_actions = st.columns([3,1]) if can_manage_patients else (st.columns(1), None)
+
+                    with col_details:
+                        st.markdown(f"**Internal ID:** {patient['id']}")
+                        st.markdown(f"**DOB:** {patient['date_of_birth']} | **Gender:** {patient['gender']}")
+                        st.markdown(f"**Contact:** {patient['phone']} | {patient['email']}")
+                        st.markdown(f"**Address:** {patient['address']}")
+                        st.markdown(f"**Allergies:** {patient['allergies'] or 'None known'}")
+                        st.markdown(f"**Medical Conditions:** {patient['medical_conditions'] or 'None'}")
+                        st.markdown(f"**Emergency Contact:** {patient['emergency_contact'] or 'N/A'}")
+                        st.markdown(f"**Insurance:** {patient['insurance_info'] or 'N/A'}")
+                        st.caption(f"Registered: {patient['created_at_ist']}")
+
+                    if can_manage_patients and col_actions:
+                        with col_actions:
+                            st.markdown("<br>", unsafe_allow_html=True) # Spacer
+                            if st.button("Edit", key=f"edit_patient_{patient['id']}", use_container_width=True):
+                                st.session_state.edit_patient_id = patient['id']
+
+                            action_button_text = "⚠️ Deactivate" if patient['is_active'] else "✅ Restore"
+                            if st.button(action_button_text, key=f"action_patient_{patient['id']}", use_container_width=True):
+                                st.session_state.action_patient_id = patient['id']
+                                st.session_state.action_patient_current_status = patient['is_active']
                     
-                    with col1:
-                        st.write(f"**DOB:** {patient['date_of_birth']}")
-                        st.write(f"**Gender:** {patient['gender']}")
-                        st.write(f"**Phone:** {patient['phone']}")
-                    
-                    with col2:
-                        st.write(f"**Allergies:** {patient['allergies'] or 'None known'}")
-                        st.write(f"**Medical Conditions:** {patient['medical_conditions'] or 'None'}")
-                    
-                    # Show prescription history if user is doctor or super admin
+                    # Prescription history button (visible to super_admin and doctor)
                     if st.session_state.user['user_type'] in ['doctor', 'super_admin']:
                         if st.button(f"View Prescription History", key=f"history_{patient['patient_id']}"):
+                             # Ensure this function takes the correct patient identifier (patient_id or internal id)
                             show_patient_prescription_history(patient['patient_id'])
+
+            if not patients_df.empty:
+                st.markdown("---") # Final separator
+
+            # Handle Edit Patient action
+            if 'edit_patient_id' in st.session_state and st.session_state.edit_patient_id:
+                show_edit_patient_form(st.session_state.edit_patient_id)
+
+            # Handle Deactivate/Restore Patient action
+            if 'action_patient_id' in st.session_state and st.session_state.action_patient_id:
+                confirm_and_action_patient(st.session_state.action_patient_id, st.session_state.action_patient_current_status)
         else:
-            st.info("No patients found")
+            st.info("No patients found matching your criteria.")
     
     with tab2:
         st.subheader("Add New Patient")
@@ -999,6 +1100,133 @@ def show_patient_management():
                         st.error(f"Error adding patient: {str(e)}")
                 else:
                     st.error("Please fill in all required fields!")
+
+# Function to show edit patient form
+def show_edit_patient_form(patient_internal_id):
+    conn = db_manager.get_connection()
+    # Fetch by internal primary key 'id'
+    patient_data_series = pd.read_sql("SELECT * FROM patients WHERE id = ?", conn, params=(patient_internal_id,)).iloc[0]
+    conn.close()
+
+    # Convert pandas Series to dict for easier handling if needed, or access directly
+    patient_data = patient_data_series.to_dict()
+
+    with st.expander(f"Edit Patient: {patient_data['first_name']} {patient_data['last_name']} (ID: {patient_data['patient_id']})", expanded=True):
+        with st.form(key=f"edit_patient_form_{patient_internal_id}"):
+            st.subheader(f"Editing Patient Record: {patient_data['patient_id']}")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                new_first_name = st.text_input("First Name*", value=patient_data['first_name'])
+                new_last_name = st.text_input("Last Name*", value=patient_data['last_name'])
+                try:
+                    dob_val = datetime.datetime.strptime(patient_data['date_of_birth'], '%Y-%m-%d').date()
+                except:
+                    dob_val = datetime.date.today() # Fallback, should not happen with good data
+                new_date_of_birth = st.date_input("Date of Birth*", value=dob_val)
+                gender_options = ["Male", "Female", "Other"]
+                current_gender_index = gender_options.index(patient_data['gender']) if patient_data['gender'] in gender_options else 0
+                new_gender = st.selectbox("Gender*", gender_options, index=current_gender_index)
+                new_phone = st.text_input("Phone", value=patient_data['phone'])
+                new_email = st.text_input("Email", value=patient_data['email'])
+
+            with col2:
+                new_address = st.text_area("Address", value=patient_data['address'])
+                new_allergies = st.text_area("Known Allergies", value=patient_data['allergies'])
+                new_medical_conditions = st.text_area("Medical Conditions", value=patient_data['medical_conditions'])
+                new_emergency_contact = st.text_input("Emergency Contact", value=patient_data['emergency_contact'])
+                new_insurance_info = st.text_input("Insurance Information", value=patient_data['insurance_info'])
+                new_is_active = st.checkbox("Is Active", value=bool(patient_data['is_active']))
+
+            submit_button = st.form_submit_button("Save Patient Changes")
+
+            if submit_button:
+                if new_first_name and new_last_name and new_date_of_birth and new_gender:
+                    updated_fields_dict = {
+                        "first_name": new_first_name, "last_name": new_last_name,
+                        "date_of_birth": new_date_of_birth.isoformat(), "gender": new_gender,
+                        "phone": new_phone, "email": new_email, "address": new_address,
+                        "allergies": new_allergies, "medical_conditions": new_medical_conditions,
+                        "emergency_contact": new_emergency_contact, "insurance_info": new_insurance_info,
+                        "is_active": new_is_active
+                    }
+
+                    # Determine actual changes for logging
+                    changed_fields_log = []
+                    for key, value in updated_fields_dict.items():
+                        # Special handling for boolean as it might be stored as int
+                        if key == 'is_active':
+                            if bool(patient_data[key]) != bool(value):
+                                changed_fields_log.append(key)
+                        elif str(patient_data[key]) != str(value): # Compare as strings for simplicity
+                            changed_fields_log.append(key)
+
+                    if not changed_fields_log:
+                        st.info("No changes detected.")
+                        st.session_state.edit_patient_id = None # Close form
+                        st.rerun()
+                        return
+
+                    try:
+                        conn = db_manager.get_connection()
+                        cursor = conn.cursor()
+
+                        set_clause = ", ".join([f"{key} = ?" for key in updated_fields_dict.keys()])
+                        values = list(updated_fields_dict.values())
+                        values.append(patient_internal_id) # For the WHERE id = ?
+
+                        cursor.execute(f"UPDATE patients SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?", tuple(values))
+                        conn.commit()
+                        conn.close()
+
+                        log_activity(st.session_state.user['id'], 'update_patient', 'patient', patient_data['patient_id'],
+                                     metadata={"updated_fields": changed_fields_log, "patient_internal_id": patient_internal_id})
+                        st.success(f"Patient {new_first_name} {new_last_name} updated successfully!")
+                        st.session_state.edit_patient_id = None # Close form
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Error updating patient: {str(e)}")
+                else:
+                    st.error("Please fill in all required fields (*).")
+
+# Function to confirm and perform deactivate/restore action on a patient
+def confirm_and_action_patient(patient_internal_id, is_currently_active):
+    action_verb = "Deactivate" if is_currently_active else "Restore"
+    action_desc = "deactivating" if is_currently_active else "restoring"
+
+    # Fetch patient_id for display message
+    conn = db_manager.get_connection()
+    patient_display_id = pd.read_sql("SELECT patient_id FROM patients WHERE id = ?", conn, params=(patient_internal_id,)).iloc[0]['patient_id']
+    conn.close()
+
+    st.warning(f"Are you sure you want to {action_verb.lower()} patient ID {patient_display_id} (Internal ID: {patient_internal_id})?")
+
+    col1, col2, col3 = st.columns([1,1,2])
+    with col1:
+        if st.button(f"Yes, {action_verb} Patient", key=f"confirm_action_patient_{patient_internal_id}", type="primary"):
+            try:
+                conn = db_manager.get_connection()
+                cursor = conn.cursor()
+
+                new_status = 0 if is_currently_active else 1
+                cursor.execute("UPDATE patients SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_status, patient_internal_id))
+                conn.commit()
+                conn.close()
+
+                log_activity(st.session_state.user['id'], f'{action_desc}_patient', 'patient', patient_display_id,
+                             metadata={"new_status": "active" if new_status else "inactive", "patient_internal_id": patient_internal_id})
+                st.success(f"Patient {patient_display_id} successfully {action_desc}d.")
+                st.session_state.action_patient_id = None # Reset and close confirmation
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Error {action_desc} patient: {str(e)}")
+
+    with col2:
+        if st.button("Cancel", key=f"cancel_action_patient_{patient_internal_id}"):
+            st.session_state.action_patient_id = None # Reset and close confirmation
+            st.rerun()
 
 def show_patient_prescription_history(patient_id):
     """Show prescription history for a patient"""
@@ -1157,110 +1385,310 @@ def show_create_prescription():
         st.session_state.prescription_lab_tests = []
     
     # Patient selection
-    if 'selected_patient' in st.session_state:
+    patient_info = None
+    if 'selected_patient' in st.session_state and st.session_state.selected_patient:
         patient_info = st.session_state.selected_patient
-        st.success(f"Creating prescription for: {patient_info['name']} ({patient_info['patient_id']})")
+        st.success(f"Creating prescription for: {patient_info['name']} ({patient_info['patient_id']}). Visit ID: {patient_info.get('visit_id', 'N/A')}")
+    elif 'manual_patient_id_selected' in st.session_state and st.session_state.manual_patient_id_selected:
+        # Fetch patient details for manually selected patient
+        conn = db_manager.get_connection()
+        p_data = pd.read_sql("SELECT * FROM patients WHERE id = ?", conn, params=(st.session_state.manual_patient_id_selected,)).iloc[0]
+        conn.close()
+        patient_info = {
+            'patient_db_id': p_data['id'],
+            'patient_id': p_data['patient_id'],
+            'name': f"{p_data['first_name']} {p_data['last_name']}",
+            'age': calculate_age(p_data['date_of_birth']),
+            'gender': p_data['gender'],
+            'allergies': p_data['allergies'] or 'None known',
+            'medical_conditions': p_data['medical_conditions'] or 'None',
+            'current_problems': st.session_state.get('manual_patient_current_problems', '') # Get problems if entered
+            # visit_id will be None for this case, or we could create a visit on the fly if needed
+        }
+        st.info(f"Manually selected patient: {patient_info['name']} ({patient_info['patient_id']})")
+
     else:
-        # Manual patient selection
+        st.subheader("Select Patient for Prescription")
         conn = db_manager.get_connection()
-        patients = pd.read_sql("SELECT id, patient_id, first_name, last_name FROM patients WHERE is_active = 1", conn)
+        patients_df = pd.read_sql("SELECT id, patient_id, first_name, last_name FROM patients WHERE is_active = 1 ORDER BY last_name, first_name", conn)
         conn.close()
-        
-        if patients.empty:
-            st.error("No patients available. Please add patients first.")
+
+        if patients_df.empty:
+            st.error("No active patients available. Please add patients first.")
             return
+
+        patient_options = {f"{row['first_name']} {row['last_name']} ({row['patient_id']})": row['id'] for _, row in patients_df.iterrows()}
         
-        patient_options = {f"{row['first_name']} {row['last_name']} ({row['patient_id']})": row['id'] for _, row in patients.iterrows()}
+        selected_patient_display_name = st.selectbox("Choose Patient*", list(patient_options.keys()), index=None, placeholder="Select a patient...")
         
-        with st.form("visit_registration_form"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                selected_patient = st.selectbox("Select Patient*", list(patient_options.keys()))
-                visit_date = st.date_input("Visit Date*", value=datetime.date.today())
-                visit_type = st.selectbox("Visit Type*", ["Consultation", "Follow-up", "Emergency", "Routine Check-up"])
-                current_problems = st.text_area("Current Problems/Complaints*")
-            
-            with col2:
-                is_followup = st.checkbox("Follow-up Visit")
-                is_report_consultation = st.checkbox("Report Consultation")
-                vital_signs = st.text_area("Vital Signs", placeholder="BP, HR, Temp, etc.")
-                notes = st.text_area("Additional Notes")
-            
-            submit_button = st.form_submit_button("Register Visit")
-            
-            if submit_button:
-                if selected_patient and visit_date and visit_type and current_problems:
-                    try:
-                        patient_id = patient_options[selected_patient]
-                        
-                        conn = db_manager.get_connection()
-                        cursor = conn.cursor()
-                        
-                        cursor.execute("""
-                            INSERT INTO patient_visits (patient_id, visit_date, visit_type, current_problems,
-                                                       is_followup, is_report_consultation, vital_signs, notes, created_by)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (patient_id, visit_date.isoformat(), visit_type, current_problems,
-                              is_followup, is_report_consultation, vital_signs, notes, st.session_state.user['id']))
-                        
-                        conn.commit()
-                        conn.close()
-                        
-                        log_activity(st.session_state.user['id'], 'create_visit', 'visit')
-                        st.success("Visit registered successfully!")
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"Error registering visit: {str(e)}")
-                else:
-                    st.error("Please fill in all required fields!")
+        # Optional: Allow entering current problems if not coming from a visit
+        manual_current_problems = st.text_area("Current Problems/Reason for Prescription (if not linked to a specific visit)", key="manual_patient_current_problems_input")
+
+        if st.button("Load Patient for Prescription"):
+            if selected_patient_display_name:
+                st.session_state.manual_patient_id_selected = patient_options[selected_patient_display_name]
+                st.session_state.manual_patient_current_problems = manual_current_problems # Save problems
+                # Clear selected_patient from today's list if it exists
+                if 'selected_patient' in st.session_state:
+                    del st.session_state.selected_patient
+                st.rerun()
+            else:
+                st.error("Please select a patient.")
+        return # Stop further rendering until patient is loaded
+
+    if not patient_info:
+        st.warning("Please select a patient to proceed.")
+        return
+
+    # --- Prescription Form Starts Here ---
+    st.markdown("---")
+    st.subheader("1. Diagnosis and Notes")
+    diagnosis = st.text_area("Diagnosis*", value=patient_info.get('current_problems', '')) # Pre-fill with current problems
+    general_notes = st.text_area("General Notes for Prescription")
+
+    # --- Medications Section ---
+    st.subheader("2. Medications")
+    col_med_select, col_med_dose, col_med_freq, col_med_dur = st.columns(4)
+
+    conn = db_manager.get_connection()
+    medications_list = pd.read_sql("SELECT id, name, strengths FROM medications WHERE is_active = 1 ORDER BY name", conn)
+    conn.close()
+    medication_options = {f"{row['name']} ({row['strengths'] or 'N/A'})": row['id'] for _, row in medications_list.iterrows()}
+
+    with col_med_select:
+        selected_med_name = st.selectbox("Select Medication", list(medication_options.keys()), index=None, key="med_select")
+    with col_med_dose:
+        dosage = st.text_input("Dosage", key="med_dosage")
+    with col_med_freq:
+        frequency = st.text_input("Frequency", key="med_frequency")
+    with col_med_dur:
+        duration = st.text_input("Duration", key="med_duration")
     
-    with tab2:
-        st.subheader("Visit History")
-        
-        conn = db_manager.get_connection()
-        visits_df = pd.read_sql("""
-            SELECT v.id, p.patient_id, p.first_name, p.last_name, v.visit_date, v.visit_type,
-                   v.current_problems, v.consultation_completed, v.created_at
-            FROM patient_visits v
-            JOIN patients p ON v.patient_id = p.id
-            WHERE v.created_by = ?
-            ORDER BY v.visit_date DESC, v.created_at DESC
-        """, conn, params=[st.session_state.user['id']])
-        conn.close()
-        
-        if not visits_df.empty:
-            # Date range filter
-            col1, col2 = st.columns(2)
-            with col1:
-                start_date = st.date_input("From Date", value=datetime.date.today() - datetime.timedelta(days=30))
-            with col2:
-                end_date = st.date_input("To Date", value=datetime.date.today())
+    med_instructions = st.text_input("Instructions (e.g., before/after food)", key="med_instructions")
+
+    if st.button("Add Medication to Prescription", key="add_med_button"):
+        if selected_med_name and dosage and frequency and duration:
+            med_id = medication_options[selected_med_name]
+            med_name_display = selected_med_name # Use the display name which includes strength for clarity
             
-            # Filter by date range
-            filtered_visits = visits_df[
-                (pd.to_datetime(visits_df['visit_date']).dt.date >= start_date) &
-                (pd.to_datetime(visits_df['visit_date']).dt.date <= end_date)
-            ]
-            
-            # Display visits
-            for _, visit in filtered_visits.iterrows():
-                status_icon = "✅" if visit['consultation_completed'] else "⏳"
-                
-                with st.expander(f"{status_icon} {visit['first_name']} {visit['last_name']} - {visit['visit_date']} ({visit['visit_type']})"):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write(f"**Patient ID:** {visit['patient_id']}")
-                        st.write(f"**Visit Type:** {visit['visit_type']}")
-                        st.write(f"**Problems:** {visit['current_problems']}")
-                    
-                    with col2:
-                        st.write(f"**Status:** {'Completed' if visit['consultation_completed'] else 'Waiting'}")
-                        st.write(f"**Registered:** {visit['created_at'][:16]}")
+            st.session_state.prescription_medications.append({
+                "id": med_id, "name": med_name_display, "dosage": dosage,
+                "frequency": frequency, "duration": duration, "instructions": med_instructions
+            })
+            # Clear inputs for next medication
+            st.session_state.med_select = None # This might not work as expected for selectbox, needs unique key if we want to clear
+            st.session_state.med_dosage = ""
+            st.session_state.med_frequency = ""
+            st.session_state.med_duration = ""
+            st.session_state.med_instructions = ""
+            st.rerun() # Rerun to update list and clear some fields (selectbox might need specific handling)
         else:
-            st.info("No visits registered yet")
+            st.error("Please fill in Medication, Dosage, Frequency, and Duration.")
+
+    if st.session_state.prescription_medications:
+        st.markdown("**Current Medications in Prescription:**")
+        for i, med in enumerate(st.session_state.prescription_medications):
+            col_disp_med, col_disp_action = st.columns([4,1])
+            with col_disp_med:
+                st.markdown(f"• **{med['name']}**: {med['dosage']}, {med['frequency']}, for {med['duration']}. *Instructions: {med['instructions'] or 'N/A'}*")
+            with col_disp_action:
+                if st.button(f"Remove##med{i}", key=f"remove_med_{i}"):
+                    st.session_state.prescription_medications.pop(i)
+                    st.rerun()
+        st.markdown("---")
+
+    # --- Lab Tests Section ---
+    st.subheader("3. Lab Tests")
+    col_lab_select, col_lab_urgency = st.columns(2)
+
+    conn = db_manager.get_connection()
+    lab_tests_list = pd.read_sql("SELECT id, test_name FROM lab_tests WHERE is_active = 1 ORDER BY test_name", conn)
+    conn.close()
+    lab_test_options = {row['test_name']: row['id'] for _, row in lab_tests_list.iterrows()}
+
+    with col_lab_select:
+        selected_lab_test_name = st.selectbox("Select Lab Test", list(lab_test_options.keys()), index=None, key="lab_select")
+    with col_lab_urgency:
+        lab_urgency = st.selectbox("Urgency", ["Routine", "Urgent", "STAT"], key="lab_urgency")
+
+    lab_instructions = st.text_input("Instructions for Lab Test", key="lab_instructions")
+
+    if st.button("Add Lab Test to Prescription", key="add_lab_button"):
+        if selected_lab_test_name:
+            test_id = lab_test_options[selected_lab_test_name]
+            st.session_state.prescription_lab_tests.append({
+                "id": test_id, "name": selected_lab_test_name,
+                "urgency": lab_urgency, "instructions": lab_instructions
+            })
+            # Clear inputs
+            st.session_state.lab_select = None
+            st.session_state.lab_urgency = "Routine"
+            st.session_state.lab_instructions = ""
+            st.rerun()
+        else:
+            st.error("Please select a Lab Test.")
+
+    if st.session_state.prescription_lab_tests:
+        st.markdown("**Current Lab Tests in Prescription:**")
+        for i, test in enumerate(st.session_state.prescription_lab_tests):
+            col_disp_lab, col_disp_action_lab = st.columns([4,1])
+            with col_disp_lab:
+                st.markdown(f"• **{test['name']}** ({test['urgency']}). *Instructions: {test['instructions'] or 'N/A'}*")
+            with col_disp_action_lab:
+                if st.button(f"Remove##lab{i}", key=f"remove_lab_{i}"):
+                    st.session_state.prescription_lab_tests.pop(i)
+                    st.rerun()
+        st.markdown("---")
+
+    # --- AI Analysis Section ---
+    st.subheader("4. AI Drug Interaction Analysis")
+    if st.button("Analyze Drug Interactions", key="analyze_interactions_button"):
+        if not st.session_state.prescription_medications:
+            st.warning("Please add medications to analyze interactions.")
+        else:
+            with st.spinner("Analyzing drug interactions..."):
+                # Prepare medication data for AI
+                meds_for_ai = []
+                for med_item in st.session_state.prescription_medications:
+                    # Find original medication name without strength for better AI processing if needed
+                    # For now, using the name as is from med_item['name'] which might include strength
+                    meds_for_ai.append({
+                        "name": med_item['name'].split(' (')[0], # Attempt to get base name
+                        "dosage": med_item['dosage'],
+                        "frequency": med_item['frequency']
+                    })
+
+                ai_patient_info = {
+                    'age': patient_info.get('age', 'Unknown'),
+                    'gender': patient_info.get('gender', 'Unknown'),
+                    'allergies': patient_info.get('allergies', 'None known'),
+                    'medical_conditions': patient_info.get('medical_conditions', 'None')
+                }
+                st.session_state.ai_analysis_result = ai_analyzer.analyze_drug_interactions(meds_for_ai, ai_patient_info)
+                
+    if 'ai_analysis_result' in st.session_state and st.session_state.ai_analysis_result:
+        display_ai_analysis(st.session_state.ai_analysis_result)
+
+    # --- Finalize and Save Section ---
+    st.markdown("---")
+    st.subheader("5. Finalize and Save Prescription")
+
+    # QR Code Placeholder
+    qr_placeholder = st.empty()
+
+    if st.button("✅ Finalize and Save Prescription", use_container_width=True, type="primary"):
+        if not diagnosis:
+            st.error("Diagnosis is a required field.")
+        elif not st.session_state.prescription_medications and not st.session_state.prescription_lab_tests:
+            st.error("Prescription must contain at least one medication or lab test.")
+        else:
+            try:
+                conn = db_manager.get_connection()
+                cursor = conn.cursor()
+
+                prescription_id_text = generate_prescription_id()
+                ai_analysis_json = json.dumps(st.session_state.get('ai_analysis_result')) if st.session_state.get('ai_analysis_result') else None
+
+                # Insert into prescriptions table
+                cursor.execute("""
+                    INSERT INTO prescriptions (prescription_id, doctor_id, patient_id, visit_id, diagnosis, notes, ai_interaction_analysis, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+                """, (prescription_id_text, st.session_state.user['id'], patient_info['patient_db_id'],
+                      patient_info.get('visit_id'), diagnosis, general_notes, ai_analysis_json))
+
+                db_prescription_id = cursor.lastrowid # Get the ID of the inserted prescription
+
+                # Insert medication items
+                for med in st.session_state.prescription_medications:
+                    cursor.execute("""
+                        INSERT INTO prescription_items (prescription_id, medication_id, dosage, frequency, duration, instructions)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (db_prescription_id, med['id'], med['dosage'], med['frequency'], med['duration'], med['instructions']))
+
+                # Insert lab test items
+                for test in st.session_state.prescription_lab_tests:
+                    cursor.execute("""
+                        INSERT INTO prescription_lab_tests (prescription_id, lab_test_id, urgency, instructions)
+                        VALUES (?, ?, ?, ?)
+                    """, (db_prescription_id, test['id'], test['urgency'], test['instructions']))
+
+                # Mark visit as completed if applicable
+                if patient_info.get('visit_id'):
+                    cursor.execute("UPDATE patient_visits SET consultation_completed = 1 WHERE id = ?", (patient_info['visit_id'],))
+
+                conn.commit()
+
+                # Log activity
+                log_activity(st.session_state.user['id'], 'create_prescription', 'prescription', db_prescription_id,
+                             metadata={'prescription_id_text': prescription_id_text, 'patient_id': patient_info['patient_id']})
+
+                st.success(f"Prescription {prescription_id_text} saved successfully!")
+
+                # Generate PDF data
+                pdf_data = {
+                    "prescription_id": prescription_id_text,
+                    "doctor_name": st.session_state.user['full_name'],
+                    "specialization": st.session_state.user.get('specialization', 'N/A'),
+                    "medical_license": st.session_state.user.get('medical_license', 'N/A'),
+                    "date": datetime.date.today().isoformat(),
+                    "patient_name": patient_info['name'],
+                    "patient_id": patient_info['patient_id'],
+                    "dob": patient_info.get('age', 'N/A'), # PDF expects DOB, but patient_info has age. This might need adjustment or passing DOB.
+                                                          # For now, using age. Let's assume PDFGenerator can handle 'age' or we adjust patient_info.
+                                                          # Corrected: PDF needs DOB. Let's fetch it if not available.
+                                                          # If patient_info came from selected_patient, it has raw date_of_birth.
+                                                          # If from manual selection, p_data['date_of_birth'] is available.
+                    "diagnosis": diagnosis,
+                    "medications": st.session_state.prescription_medications,
+                    "lab_tests": st.session_state.prescription_lab_tests,
+                    "notes": general_notes
+                }
+                # Ensure DOB is correct for PDF
+                if 'date_of_birth' in patient_info: # From today's patients
+                     pdf_data["dob"] = patient_info['date_of_birth']
+                elif 'manual_patient_id_selected' in st.session_state : # From manual selection
+                     conn_temp = db_manager.get_connection()
+                     p_dob = pd.read_sql("SELECT date_of_birth FROM patients WHERE id = ?", conn_temp, params=(st.session_state.manual_patient_id_selected,)).iloc[0]['date_of_birth']
+                     conn_temp.close()
+                     pdf_data["dob"] = p_dob
+
+
+                pdf_bytes = pdf_generator.generate_prescription_pdf(pdf_data)
+                st.download_button(
+                    label="📄 Download Prescription PDF",
+                    data=pdf_bytes,
+                    file_name=f"prescription_{prescription_id_text}.pdf",
+                    mime="application/pdf"
+                )
+
+                # Generate and display QR code for the prescription ID
+                qr_img = qrcode.make(f"Prescription ID: {prescription_id_text}\nPatient: {patient_info['name']}\nDate: {pdf_data['date']}")
+                img_byte_arr = io.BytesIO()
+                qr_img.save(img_byte_arr, format='PNG')
+                img_byte_arr = img_byte_arr.getvalue()
+                with qr_placeholder.container(): # Use the placeholder
+                    st.image(img_byte_arr, caption="Scan for Prescription Details", width=150)
+
+                # Clear session state for next prescription
+                st.session_state.prescription_medications = []
+                st.session_state.prescription_lab_tests = []
+                if 'ai_analysis_result' in st.session_state:
+                    del st.session_state.ai_analysis_result
+                if 'selected_patient' in st.session_state: # Navigated from Today's Patients
+                    del st.session_state.selected_patient
+                if 'manual_patient_id_selected' in st.session_state: # Manually selected
+                    del st.session_state.manual_patient_id_selected
+                if 'manual_patient_current_problems' in st.session_state:
+                    del st.session_state.manual_patient_current_problems
+                # Consider not rerunning immediately to let user download PDF/see QR
+                # st.rerun()
+
+            except Exception as e:
+                st.error(f"Error saving prescription: {str(e)}")
+                conn.rollback() # Rollback on error
+            finally:
+                if conn:
+                    conn.close()
 
 # Templates Management (Doctor)
 def show_templates():
@@ -1565,23 +1993,23 @@ def show_analytics():
     
     if user_type == 'assistant':
         recent_activity = pd.read_sql("""
-            SELECT action_type, entity_type, timestamp
+            SELECT action_type, entity_type, timestamp, metadata
             FROM analytics
-            WHERE user_id = ?
+            WHERE user_id = ? AND action_type NOT IN ('login', 'logout')
             ORDER BY timestamp DESC
             LIMIT 10
         """, conn, params=[st.session_state.user['id']])
     elif user_type == 'doctor':
         recent_activity = pd.read_sql("""
-            SELECT action_type, entity_type, timestamp
+            SELECT action_type, entity_type, timestamp, metadata
             FROM analytics
-            WHERE user_id = ?
+            WHERE user_id = ? AND action_type NOT IN ('login', 'logout')
             ORDER BY timestamp DESC
             LIMIT 10
         """, conn, params=[st.session_state.user['id']])
     else:  # super_admin
         recent_activity = pd.read_sql("""
-            SELECT a.action_type, a.entity_type, a.timestamp, u.full_name
+            SELECT a.action_type, a.entity_type, a.timestamp, u.full_name, a.metadata
             FROM analytics a
             JOIN users u ON a.user_id = u.id
             ORDER BY a.timestamp DESC
@@ -1594,6 +2022,131 @@ def show_analytics():
         st.info("No recent activity")
     
     conn.close()
+
+# Main application logic
+def show_edit_user_form(user_id):
+    conn = db_manager.get_connection()
+    user_data = pd.read_sql("SELECT * FROM users WHERE id = ?", conn, params=(user_id,)).iloc[0]
+    conn.close()
+
+    with st.expander(f"Edit User: {user_data['full_name']} ({user_data['username']})", expanded=True):
+        with st.form(key=f"edit_user_form_{user_id}"):
+            st.subheader("Edit User Details")
+
+            current_user_is_super_admin = st.session_state.user['user_type'] == 'super_admin'
+            editing_self = st.session_state.user['id'] == user_id
+
+            col1, col2 = st.columns(2)
+            with col1:
+                new_full_name = st.text_input("Full Name", value=user_data['full_name'])
+                new_email = st.text_input("Email", value=user_data['email'])
+
+                # User type modification constraints
+                if editing_self and user_data['user_type'] == 'super_admin':
+                    new_user_type = st.selectbox("User Type (Cannot change own type)", [user_data['user_type']], disabled=True, index=0)
+                    st.caption("Super Admins cannot change their own user type.")
+                else:
+                    user_types = ["doctor", "assistant", "super_admin"]
+                    current_type_index = user_types.index(user_data['user_type']) if user_data['user_type'] in user_types else 0
+                    new_user_type = st.selectbox("User Type", user_types, index=current_type_index)
+
+            with col2:
+                new_phone = st.text_input("Phone", value=user_data['phone'])
+                new_medical_license = st.text_input("Medical License", value=user_data['medical_license'])
+                new_specialization = st.text_input("Specialization", value=user_data['specialization'])
+
+                # Active status modification constraints
+                if editing_self and user_data['user_type'] == 'super_admin':
+                    new_is_active = st.checkbox("Is Active (Cannot deactivate own account)", value=bool(user_data['is_active']), disabled=True)
+                    st.caption("Super Admins cannot deactivate their own account.")
+                else:
+                    new_is_active = st.checkbox("Is Active", value=bool(user_data['is_active']))
+
+            st.markdown("---")
+            st.subheader("Reset Password (Optional)")
+            new_password = st.text_input("New Password (leave blank to keep current)", type="password")
+            confirm_new_password = st.text_input("Confirm New Password", type="password")
+
+            submit_button = st.form_submit_button("Save Changes")
+
+            if submit_button:
+                if new_password != confirm_new_password:
+                    st.error("Passwords do not match.")
+                else:
+                    try:
+                        conn = db_manager.get_connection()
+                        cursor = conn.cursor()
+
+                        update_fields = {
+                            "full_name": new_full_name, "email": new_email, "user_type": new_user_type,
+                            "phone": new_phone, "medical_license": new_medical_license,
+                            "specialization": new_specialization, "is_active": new_is_active
+                        }
+
+                        # Apply constraints for super admin editing themselves
+                        if editing_self and user_data['user_type'] == 'super_admin':
+                            update_fields["user_type"] = user_data['user_type'] # Cannot change own type
+                            update_fields["is_active"] = True # Cannot deactivate self
+
+                        set_clause = ", ".join([f"{key} = ?" for key in update_fields.keys()])
+                        values = list(update_fields.values())
+
+                        if new_password:
+                            set_clause += ", password_hash = ?"
+                            values.append(db_manager.hash_password(new_password))
+
+                        values.append(user_id)
+
+                        cursor.execute(f"UPDATE users SET {set_clause} WHERE id = ?", tuple(values))
+                        conn.commit()
+                        conn.close()
+
+                        log_activity(st.session_state.user['id'], 'update_user', 'user', user_id,
+                                     metadata={"updated_fields": list(update_fields.keys()) + (["password"] if new_password else [])})
+                        st.success("User details updated successfully!")
+                        st.session_state.edit_user_id = None # Close form
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Error updating user: {str(e)}")
+
+def confirm_and_delete_user(user_id_to_action, is_active_status):
+    action_verb = "Deactivate" if is_active_status else "Restore"
+    action_desc = "deactivating" if is_active_status else "restoring"
+
+    st.warning(f"Are you sure you want to {action_verb.lower()} user ID {user_id_to_action}?")
+
+    col1, col2, col3 = st.columns([1,1,2])
+    with col1:
+        if st.button(f"Yes, {action_verb} User", key=f"confirm_delete_{user_id_to_action}", type="primary"):
+            try:
+                # Super admin self-delete/deactivate prevention (already handled by button disable, but double check)
+                if st.session_state.user['id'] == user_id_to_action and is_active_status:
+                     st.error("Operation not allowed: Super Admins cannot deactivate their own account.")
+                     st.session_state.delete_user_id = None # Reset
+                     st.rerun()
+                     return
+
+                conn = db_manager.get_connection()
+                cursor = conn.cursor()
+
+                new_status = 0 if is_active_status else 1
+                cursor.execute("UPDATE users SET is_active = ? WHERE id = ?", (new_status, user_id_to_action))
+                conn.commit()
+                conn.close()
+
+                log_activity(st.session_state.user['id'], f'{action_desc}_user', 'user', user_id_to_action, metadata={"new_status": "active" if new_status else "inactive"})
+                st.success(f"User successfully {action_desc}d.")
+                st.session_state.delete_user_id = None # Reset and close confirmation
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Error {action_desc} user: {str(e)}")
+
+    with col2:
+        if st.button("Cancel", key=f"cancel_delete_{user_id_to_action}"):
+            st.session_state.delete_user_id = None # Reset and close confirmation
+            st.rerun()
 
 # Main application logic
 def main():
@@ -1625,8 +2178,10 @@ def main():
             show_todays_patients()
         elif page == 'create_prescription':
             show_create_prescription()
-        elif page == 'medications':
+        elif page == 'medications': # Placeholder for now
             show_medication_database()
+            # st.markdown('<div class="main-header"><h1>💊 Medication Database</h1></div>', unsafe_allow_html=True)
+            # st.info("Medication database management will be implemented here.")
         elif page == 'lab_tests':
             show_lab_tests_database()
         elif page == 'visit_registration':
