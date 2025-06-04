@@ -7,7 +7,6 @@ import datetime
 import plotly.express as px
 import plotly.graph_objects as go
 from fpdf import FPDF
-from fpdf.enums import XPos, YPos
 import qrcode
 from PIL import Image
 import io
@@ -542,90 +541,102 @@ class AIAnalyzer:
 # PDF Generation
 class PDFGenerator:
     def generate_prescription_pdf(self, prescription_data):
+        # Import the enums inside the method to avoid import issues
+        from fpdf.enums import XPos, YPos
+        
         pdf = FPDF()
         pdf.add_page()
-        pdf.set_font('Arial', 'B', 16)
+        
+        # Use Helvetica instead of Arial to avoid deprecation warnings
+        pdf.set_font('Helvetica', 'B', 16)
         
         # Header
-        pdf.cell(0, 10, 'MEDICAL PRESCRIPTION', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
+        pdf.cell(0, 10, 'MEDICAL PRESCRIPTION', new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
         pdf.ln(5)
         
         # Doctor information
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 8, f"Dr. {prescription_data['doctor_name']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font('Arial', '', 10)
-        pdf.cell(0, 6, f"Specialization: {prescription_data['specialization']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 6, f"License: {prescription_data['medical_license']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font('Helvetica', 'B', 12)
+        pdf.cell(0, 8, f"Dr. {prescription_data['doctor_name']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font('Helvetica', '', 10)
+        pdf.cell(0, 6, f"Specialization: {prescription_data['specialization']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 6, f"License: {prescription_data['medical_license']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
         
         # Prescription details
-        pdf.set_font('Arial', 'B', 10)
-        pdf.cell(0, 6, f"Prescription ID: {prescription_data['prescription_id']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 6, f"Date: {prescription_data['date']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.cell(0, 6, f"Prescription ID: {prescription_data['prescription_id']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 6, f"Date: {prescription_data['date']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
         
         # Patient information
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 8, 'PATIENT INFORMATION', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font('Arial', '', 10)
-        pdf.cell(0, 6, f"Name: {prescription_data['patient_name']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 6, f"Patient ID: {prescription_data['patient_id']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 6, f"DOB: {prescription_data['dob']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font('Helvetica', 'B', 12)
+        pdf.cell(0, 8, 'PATIENT INFORMATION', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font('Helvetica', '', 10)
+        pdf.cell(0, 6, f"Name: {prescription_data['patient_name']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 6, f"Patient ID: {prescription_data['patient_id']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 6, f"DOB: {prescription_data['dob']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
         
         # Diagnosis
         if prescription_data.get('diagnosis'):
-            pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 8, 'DIAGNOSIS', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_font('Arial', '', 10)
-            pdf.multi_cell(0, 6, prescription_data['diagnosis'], new_x=XPos.LMARGIN, new_y=YPos.NEXT) # Assuming multi_cell should also go to next line start
-            pdf.ln(3) # This might be redundant if multi_cell handles ln fully or might need adjustment
+            pdf.set_font('Helvetica', 'B', 12)
+            pdf.cell(0, 8, 'DIAGNOSIS', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font('Helvetica', '', 10)
+            pdf.multi_cell(0, 6, prescription_data['diagnosis'])
+            pdf.ln(3)
         
         # Medications
         if prescription_data.get('medications'):
-            pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 8, 'MEDICATIONS', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_font('Arial', '', 10)
+            pdf.set_font('Helvetica', 'B', 12)
+            pdf.cell(0, 8, 'MEDICATIONS', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font('Helvetica', '', 10)
             
             for i, med in enumerate(prescription_data['medications'], 1):
-                pdf.cell(0, 6, f"{i}. {med['name']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                pdf.cell(10, 6, '', 0, 0)  # Indent - ln=0, remains as is
-                pdf.cell(0, 6, f"   Dosage: {med['dosage']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                pdf.cell(10, 6, '', 0, 0)  # Indent - ln=0, remains as is
-                pdf.cell(0, 6, f"   Frequency: {med['frequency']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                pdf.cell(10, 6, '', 0, 0)  # Indent - ln=0, remains as is
-                pdf.cell(0, 6, f"   Duration: {med['duration']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.cell(0, 6, f"{i}. {med['name']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.cell(10, 6, '', new_x=XPos.RIGHT, new_y=YPos.TOP)  # Indent
+                pdf.cell(0, 6, f"   Dosage: {med['dosage']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.cell(10, 6, '', new_x=XPos.RIGHT, new_y=YPos.TOP)  # Indent
+                pdf.cell(0, 6, f"   Frequency: {med['frequency']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.cell(10, 6, '', new_x=XPos.RIGHT, new_y=YPos.TOP)  # Indent
+                pdf.cell(0, 6, f"   Duration: {med['duration']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 if med.get('instructions'):
-                    pdf.cell(10, 6, '', 0, 0)  # Indent - ln=0, remains as is
-                    pdf.multi_cell(0, 6, f"   Instructions: {med['instructions']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT) # Assuming multi_cell should also go to next line start
+                    pdf.cell(10, 6, '', new_x=XPos.RIGHT, new_y=YPos.TOP)  # Indent
+                    pdf.multi_cell(0, 6, f"   Instructions: {med['instructions']}")
                 pdf.ln(2)
         
         # Lab tests
         if prescription_data.get('lab_tests'):
-            pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 8, 'RECOMMENDED LAB TESTS', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_font('Arial', '', 10)
+            pdf.set_font('Helvetica', 'B', 12)
+            pdf.cell(0, 8, 'RECOMMENDED LAB TESTS', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font('Helvetica', '', 10)
             
             for i, test in enumerate(prescription_data['lab_tests'], 1):
-                pdf.cell(0, 6, f"{i}. {test['name']} ({test['urgency']})", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.cell(0, 6, f"{i}. {test['name']} ({test['urgency']})", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 if test.get('instructions'):
-                    pdf.cell(10, 6, '', 0, 0)  # Indent - ln=0, remains as is
-                    pdf.multi_cell(0, 6, f"   Instructions: {test['instructions']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT) # Assuming multi_cell should also go to next line start
+                    pdf.cell(10, 6, '', new_x=XPos.RIGHT, new_y=YPos.TOP)  # Indent
+                    pdf.multi_cell(0, 6, f"   Instructions: {test['instructions']}")
         
         # Notes
         if prescription_data.get('notes'):
             pdf.ln(5)
-            pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 8, 'NOTES', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.set_font('Arial', '', 10)
-            pdf.multi_cell(0, 6, prescription_data['notes'], new_x=XPos.LMARGIN, new_y=YPos.NEXT) # Assuming multi_cell should also go to next line start
+            pdf.set_font('Helvetica', 'B', 12)
+            pdf.cell(0, 8, 'NOTES', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font('Helvetica', '', 10)
+            pdf.multi_cell(0, 6, prescription_data['notes'])
         
         # Footer
         pdf.ln(10)
-        pdf.set_font('Arial', '', 8)
-        pdf.cell(0, 6, f"Generated by MedScript Pro on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
+        pdf.set_font('Helvetica', '', 8)
+        pdf.cell(0, 6, f"Generated by MedScript Pro on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
         
-        return pdf.output(dest='S')
+        # Get the PDF output and ensure it's bytes
+        pdf_output = pdf.output()
+        
+        # Convert bytearray to bytes if necessary
+        if isinstance(pdf_output, bytearray):
+            return bytes(pdf_output)
+        else:
+            return pdf_output
 
 # Initialize managers
 @st.cache_resource
@@ -835,8 +846,35 @@ def show_sidebar():
                 "My Analytics": "analytics"
             }
         
-        selected_page = st.radio("Navigation", list(pages.keys()))
-        st.session_state.current_page = pages[selected_page]
+        # selected_page = st.radio("Navigation", list(pages.keys()))
+        # st.session_state.current_page = pages[selected_page]
+        #-----
+        # Find the current page index for the radio button
+        current_page_key = st.session_state.current_page
+        current_page_name = None
+        for page_name, page_key in pages.items():
+            if page_key == current_page_key:
+                current_page_name = page_name
+                break
+
+        # If current page is not found, default to first page
+        if current_page_name is None:
+            current_page_name = list(pages.keys())[0]
+            st.session_state.current_page = pages[current_page_name]
+
+        # Get the index of current page for radio button
+        current_index = list(pages.keys()).index(current_page_name)
+
+        # Show radio buttons with current selection
+        selected_page = st.radio("Navigation", list(pages.keys()), index=current_index)
+
+        # Only update current_page if user actually selected something different
+        if pages[selected_page] != st.session_state.current_page:
+            st.session_state.current_page = pages[selected_page]
+            # Clear selected patient when navigating away from prescription page
+            if st.session_state.current_page != 'create_prescription' and 'selected_patient' in st.session_state:
+                del st.session_state.selected_patient
+            st.rerun()
         
         st.markdown("---")
         if st.button("Logout", use_container_width=True):
@@ -1097,10 +1135,11 @@ def show_patient_management():
         if not patients_df.empty:
             for index, patient in patients_df.iterrows():
                 st.markdown("---")
-
+                #-----
                 status_text = "Active" if patient['is_active'] else "Inactive"
-                status_color = "green" if patient['is_active'] else "red"
-                expander_title = f"👤 {patient['first_name']} {patient['last_name']} ({patient['patient_id']}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>"
+                status_emoji = "✅" if patient['is_active'] else "❌"
+                expander_title = f"👤 {patient['first_name']} {patient['last_name']} ({patient['patient_id']}) {status_emoji} {status_text}"
+
 
                 with st.expander(expander_title): # unsafe_allow_html removed
                     col_details, col_actions = st.columns([3,1]) if can_manage_patients else (st.columns(1), None)
@@ -1129,9 +1168,11 @@ def show_patient_management():
                     
                     # Prescription history button (visible to super_admin and doctor)
                     if st.session_state.user['user_type'] in ['doctor', 'super_admin']:
+                        #---
                         if st.button(f"View Prescription History", key=f"history_{patient['patient_id']}"):
-                             # Ensure this function takes the correct patient identifier (patient_id or internal id)
-                            show_patient_prescription_history(patient['patient_id'])
+                            # Set a session state to show history outside of expander
+                            st.session_state.show_prescription_history = patient['patient_id']
+                            st.rerun()
 
             if not patients_df.empty:
                 st.markdown("---") # Final separator
@@ -1195,7 +1236,14 @@ def show_patient_management():
                         st.error(f"Error adding patient: {str(e)}")
                 else:
                     st.error("Please fill in all required fields!")
-
+    if 'show_prescription_history' in st.session_state and st.session_state.show_prescription_history:
+        st.markdown("---")
+        show_patient_prescription_history(st.session_state.show_prescription_history, use_expanders=True)
+        
+        if st.button("Close Prescription History", key="close_history"):
+            del st.session_state.show_prescription_history
+            st.rerun()
+            
 # Function to show edit patient form
 def show_edit_patient_form(patient_internal_id):
     conn = db_manager.get_connection()
@@ -1323,7 +1371,7 @@ def confirm_and_action_patient(patient_internal_id, is_currently_active):
             st.session_state.action_patient_id = None # Reset and close confirmation
             st.rerun()
 
-def show_patient_prescription_history(patient_id):
+def show_patient_prescription_history(patient_id, use_expanders=True):
     """Show prescription history for a patient"""
     conn = db_manager.get_connection()
     
@@ -1338,34 +1386,48 @@ def show_patient_prescription_history(patient_id):
     """, conn, params=[patient_id])
     
     if not prescriptions.empty:
-        st.subheader(f"Prescription History for {patient_id}")
+        if use_expanders:
+            st.subheader(f"Prescription History for {patient_id}")
+        else:
+            st.markdown(f"**📋 Prescription History for {patient_id}**")
         
         for _, prescription in prescriptions.iterrows():
-            with st.expander(f"📋 {prescription['prescription_id']} - {prescription['created_at'][:10]}"):
-                st.write(f"**Doctor:** {prescription['doctor_name']}")
-                st.write(f"**Diagnosis:** {prescription['diagnosis']}")
-                
-                # Get medications for this prescription
-                medications = pd.read_sql("""
-                    SELECT m.name, pi.dosage, pi.frequency, pi.duration, pi.instructions
-                    FROM prescription_items pi
-                    JOIN medications m ON pi.medication_id = m.id
-                    JOIN prescriptions p ON pi.prescription_id = p.id
-                    WHERE p.prescription_id = ?
-                """, conn, params=[prescription['prescription_id']])
-                
-                if not medications.empty:
-                    st.write("**Medications:**")
-                    for _, med in medications.iterrows():
-                        st.write(f"• {med['name']} - {med['dosage']}, {med['frequency']}, {med['duration']}")
-                
-                if prescription['notes']:
-                    st.write(f"**Notes:** {prescription['notes']}")
+            prescription_title = f"📋 {prescription['prescription_id']} - {prescription['created_at'][:10]}"
+            
+            if use_expanders:
+                with st.expander(prescription_title):
+                    display_prescription_details(prescription, conn)
+            else:
+                st.markdown(f"**{prescription_title}**")
+                with st.container():
+                    display_prescription_details(prescription, conn)
+                st.markdown("---")
     else:
         st.info("No prescription history found for this patient")
     
     conn.close()
-
+def display_prescription_details(prescription, conn):
+    """Helper function to display prescription details"""
+    st.write(f"**Doctor:** {prescription['doctor_name']}")
+    st.write(f"**Diagnosis:** {prescription['diagnosis']}")
+    
+    # Get medications for this prescription
+    medications = pd.read_sql("""
+        SELECT m.name, pi.dosage, pi.frequency, pi.duration, pi.instructions
+        FROM prescription_items pi
+        JOIN medications m ON pi.medication_id = m.id
+        JOIN prescriptions p ON pi.prescription_id = p.id
+        WHERE p.prescription_id = ?
+    """, conn, params=[prescription['prescription_id']])
+    
+    if not medications.empty:
+        st.write("**Medications:**")
+        for _, med in medications.iterrows():
+            st.write(f"• {med['name']} - {med['dosage']}, {med['frequency']}, {med['duration']}")
+    
+    if prescription['notes']:
+        st.write(f"**Notes:** {prescription['notes']}")
+        
 # Today's Patients (Doctor only)
 def show_todays_patients():
     st.markdown('<div class="main-header"><h1>📅 Today\'s Patients</h1></div>', unsafe_allow_html=True)
@@ -1446,6 +1508,9 @@ def show_todays_patients():
             with col2:
                 if not patient['consultation_completed']:
                     if st.button(f"📝 Prescribe", key=f"prescribe_{patient['visit_id']}"):
+                        # Set the page first
+                        st.session_state.current_page = 'create_prescription'
+                        # Then set the patient data
                         st.session_state.selected_patient = {
                             'visit_id': patient['visit_id'],
                             'patient_db_id': patient['patient_db_id'],
@@ -1455,9 +1520,19 @@ def show_todays_patients():
                             'gender': patient['gender'],
                             'allergies': patient['allergies'] or 'None known',
                             'medical_conditions': patient['medical_conditions'] or 'None',
-                            'current_problems': patient['current_problems']
+                            'current_problems': patient['current_problems'],
+                            'date_of_birth': patient['date_of_birth']  # Add this for PDF generation
                         }
-                        st.session_state.current_page = 'create_prescription'
+                        
+                        # Clear any existing prescription data to start fresh
+                        if 'prescription_medications' in st.session_state:
+                            st.session_state.prescription_medications = []
+                        if 'prescription_lab_tests' in st.session_state:
+                            st.session_state.prescription_lab_tests = []
+                        if 'ai_analysis_result' in st.session_state:
+                            del st.session_state.ai_analysis_result
+                        
+                        # Force a rerun to navigate to the prescription page
                         st.rerun()
                 else:
                     st.success("Consultation Completed")
