@@ -7,6 +7,7 @@ import datetime
 import plotly.express as px
 import plotly.graph_objects as go
 from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 import qrcode
 from PIL import Image
 import io
@@ -546,85 +547,85 @@ class PDFGenerator:
         pdf.set_font('Arial', 'B', 16)
         
         # Header
-        pdf.cell(0, 10, 'MEDICAL PRESCRIPTION', 0, 1, 'C')
+        pdf.cell(0, 10, 'MEDICAL PRESCRIPTION', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
         pdf.ln(5)
         
         # Doctor information
         pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 8, f"Dr. {prescription_data['doctor_name']}", 0, 1)
+        pdf.cell(0, 8, f"Dr. {prescription_data['doctor_name']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_font('Arial', '', 10)
-        pdf.cell(0, 6, f"Specialization: {prescription_data['specialization']}", 0, 1)
-        pdf.cell(0, 6, f"License: {prescription_data['medical_license']}", 0, 1)
+        pdf.cell(0, 6, f"Specialization: {prescription_data['specialization']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 6, f"License: {prescription_data['medical_license']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
         
         # Prescription details
         pdf.set_font('Arial', 'B', 10)
-        pdf.cell(0, 6, f"Prescription ID: {prescription_data['prescription_id']}", 0, 1)
-        pdf.cell(0, 6, f"Date: {prescription_data['date']}", 0, 1)
+        pdf.cell(0, 6, f"Prescription ID: {prescription_data['prescription_id']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 6, f"Date: {prescription_data['date']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
         
         # Patient information
         pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 8, 'PATIENT INFORMATION', 0, 1)
+        pdf.cell(0, 8, 'PATIENT INFORMATION', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_font('Arial', '', 10)
-        pdf.cell(0, 6, f"Name: {prescription_data['patient_name']}", 0, 1)
-        pdf.cell(0, 6, f"Patient ID: {prescription_data['patient_id']}", 0, 1)
-        pdf.cell(0, 6, f"DOB: {prescription_data['dob']}", 0, 1)
+        pdf.cell(0, 6, f"Name: {prescription_data['patient_name']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 6, f"Patient ID: {prescription_data['patient_id']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 6, f"DOB: {prescription_data['dob']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
         
         # Diagnosis
         if prescription_data.get('diagnosis'):
             pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 8, 'DIAGNOSIS', 0, 1)
+            pdf.cell(0, 8, 'DIAGNOSIS', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_font('Arial', '', 10)
-            pdf.multi_cell(0, 6, prescription_data['diagnosis'])
-            pdf.ln(3)
+            pdf.multi_cell(0, 6, prescription_data['diagnosis'], new_x=XPos.LMARGIN, new_y=YPos.NEXT) # Assuming multi_cell should also go to next line start
+            pdf.ln(3) # This might be redundant if multi_cell handles ln fully or might need adjustment
         
         # Medications
         if prescription_data.get('medications'):
             pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 8, 'MEDICATIONS', 0, 1)
+            pdf.cell(0, 8, 'MEDICATIONS', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_font('Arial', '', 10)
             
             for i, med in enumerate(prescription_data['medications'], 1):
-                pdf.cell(0, 6, f"{i}. {med['name']}", 0, 1)
-                pdf.cell(10, 6, '', 0, 0)  # Indent
-                pdf.cell(0, 6, f"   Dosage: {med['dosage']}", 0, 1)
-                pdf.cell(10, 6, '', 0, 0)  # Indent
-                pdf.cell(0, 6, f"   Frequency: {med['frequency']}", 0, 1)
-                pdf.cell(10, 6, '', 0, 0)  # Indent
-                pdf.cell(0, 6, f"   Duration: {med['duration']}", 0, 1)
+                pdf.cell(0, 6, f"{i}. {med['name']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.cell(10, 6, '', 0, 0)  # Indent - ln=0, remains as is
+                pdf.cell(0, 6, f"   Dosage: {med['dosage']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.cell(10, 6, '', 0, 0)  # Indent - ln=0, remains as is
+                pdf.cell(0, 6, f"   Frequency: {med['frequency']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.cell(10, 6, '', 0, 0)  # Indent - ln=0, remains as is
+                pdf.cell(0, 6, f"   Duration: {med['duration']}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 if med.get('instructions'):
-                    pdf.cell(10, 6, '', 0, 0)  # Indent
-                    pdf.multi_cell(0, 6, f"   Instructions: {med['instructions']}")
+                    pdf.cell(10, 6, '', 0, 0)  # Indent - ln=0, remains as is
+                    pdf.multi_cell(0, 6, f"   Instructions: {med['instructions']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT) # Assuming multi_cell should also go to next line start
                 pdf.ln(2)
         
         # Lab tests
         if prescription_data.get('lab_tests'):
             pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 8, 'RECOMMENDED LAB TESTS', 0, 1)
+            pdf.cell(0, 8, 'RECOMMENDED LAB TESTS', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_font('Arial', '', 10)
             
             for i, test in enumerate(prescription_data['lab_tests'], 1):
-                pdf.cell(0, 6, f"{i}. {test['name']} ({test['urgency']})", 0, 1)
+                pdf.cell(0, 6, f"{i}. {test['name']} ({test['urgency']})", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 if test.get('instructions'):
-                    pdf.cell(10, 6, '', 0, 0)  # Indent
-                    pdf.multi_cell(0, 6, f"   Instructions: {test['instructions']}")
+                    pdf.cell(10, 6, '', 0, 0)  # Indent - ln=0, remains as is
+                    pdf.multi_cell(0, 6, f"   Instructions: {test['instructions']}", new_x=XPos.LMARGIN, new_y=YPos.NEXT) # Assuming multi_cell should also go to next line start
         
         # Notes
         if prescription_data.get('notes'):
             pdf.ln(5)
             pdf.set_font('Arial', 'B', 12)
-            pdf.cell(0, 8, 'NOTES', 0, 1)
+            pdf.cell(0, 8, 'NOTES', 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_font('Arial', '', 10)
-            pdf.multi_cell(0, 6, prescription_data['notes'])
+            pdf.multi_cell(0, 6, prescription_data['notes'], new_x=XPos.LMARGIN, new_y=YPos.NEXT) # Assuming multi_cell should also go to next line start
         
         # Footer
         pdf.ln(10)
         pdf.set_font('Arial', '', 8)
-        pdf.cell(0, 6, f"Generated by MedScript Pro on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 0, 1, 'C')
+        pdf.cell(0, 6, f"Generated by MedScript Pro on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
         
-        return pdf.output(dest='S').encode('latin-1')
+        return pdf.output(dest='S')
 
 # Initialize managers
 @st.cache_resource
