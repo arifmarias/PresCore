@@ -2256,9 +2256,34 @@ def _display_medications_view(is_super_admin):
             expander_title = f"**{med_name}** ({med['generic_name'] or 'N/A'}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>{controlled_text}"
 
             with st.expander(expander_title): # unsafe_allow_html removed
-                col_details, col_actions = st.columns([3,1]) if is_super_admin else (st.columns(1), None)
+                if is_super_admin:
+                    col_details, col_actions = st.columns([3,1])
+                    with col_details:
+                        st.markdown(f"**Brand Names:** {med['brand_names'] or 'N/A'}")
+                        st.markdown(f"**Drug Class:** {med['drug_class'] or 'N/A'}")
+                        st.markdown(f"**Dosage Forms:** {med['dosage_forms'] or 'N/A'} | **Strengths:** {med['strengths'] or 'N/A'}")
+                        st.markdown(f"**Indications:** {med['indications'] or 'N/A'}")
+                        st.markdown(f"**Contraindications:** {med['contraindications'] or 'N/A'}")
+                        st.markdown(f"**Side Effects:** {med['side_effects'] or 'N/A'}")
+                        st.markdown(f"**Interactions:** {med['interactions'] or 'N/A'}")
+                        st.caption(f"Favorite: {'Yes' if med['is_favorite'] else 'No'} | Created by User ID: {med['created_by'] or 'N/A'} | Internal ID: {med['id']}") # Corrected med_id to med['id']
 
-                with col_details:
+                    with col_actions:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("Edit", key=f"edit_med_{med['id']}", use_container_width=True):
+                            st.session_state.edit_medication_id = med['id']
+                            if 'action_medication_id' in st.session_state:
+                                del st.session_state.action_medication_id
+                            st.rerun()
+
+                        action_button_text = "⚠️ Deactivate" if med['is_active'] else "✅ Restore" # Corrected is_active to med['is_active']
+                        if st.button(action_button_text, key=f"action_med_{med['id']}", use_container_width=True):
+                            st.session_state.action_medication_id = med['id']
+                            st.session_state.action_medication_current_status = med['is_active'] # Corrected is_active
+                            if 'edit_medication_id' in st.session_state:
+                                del st.session_state.edit_medication_id
+                            st.rerun()
+                else: # Doctor or Assistant - display details directly
                     st.markdown(f"**Brand Names:** {med['brand_names'] or 'N/A'}")
                     st.markdown(f"**Drug Class:** {med['drug_class'] or 'N/A'}")
                     st.markdown(f"**Dosage Forms:** {med['dosage_forms'] or 'N/A'} | **Strengths:** {med['strengths'] or 'N/A'}")
@@ -2266,24 +2291,7 @@ def _display_medications_view(is_super_admin):
                     st.markdown(f"**Contraindications:** {med['contraindications'] or 'N/A'}")
                     st.markdown(f"**Side Effects:** {med['side_effects'] or 'N/A'}")
                     st.markdown(f"**Interactions:** {med['interactions'] or 'N/A'}")
-                    st.caption(f"Favorite: {'Yes' if med['is_favorite'] else 'No'} | Created by User ID: {med['created_by'] or 'N/A'} | Internal ID: {med_id}")
-
-                if is_super_admin and col_actions:
-                    with col_actions:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("Edit", key=f"edit_med_{med_id}", use_container_width=True):
-                            st.session_state.edit_medication_id = med_id
-                            if 'action_medication_id' in st.session_state: # Clear other action
-                                del st.session_state.action_medication_id
-                            st.rerun()
-
-                        action_button_text = "⚠️ Deactivate" if is_active else "✅ Restore"
-                        if st.button(action_button_text, key=f"action_med_{med_id}", use_container_width=True):
-                            st.session_state.action_medication_id = med_id
-                            st.session_state.action_medication_current_status = is_active
-                            if 'edit_medication_id' in st.session_state: # Clear other action
-                                del st.session_state.edit_medication_id
-                            st.rerun()
+                    st.caption(f"Favorite: {'Yes' if med['is_favorite'] else 'No'} | Created by User ID: {med['created_by'] or 'N/A'} | Internal ID: {med['id']}") # Corrected med_id
         if not medications_df.empty: st.markdown("---")
     else:
         st.info("No medications found matching your criteria.")
@@ -2539,25 +2547,34 @@ def _display_lab_tests_view(is_super_admin):
             status_text = "Active" if is_active else "Inactive"; status_color = "green" if is_active else "red"
             expander_title = f"**{test_name}** ({test['test_category'] or 'N/A'}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>"
             with st.expander(expander_title): # unsafe_allow_html removed
-                col_details, col_actions = st.columns([3,1]) if is_super_admin else (st.columns(1), None)
-                with col_details:
+                if is_super_admin:
+                    col_details, col_actions = st.columns([3,1])
+                    with col_details:
+                        st.markdown(f"**Normal Range:** {test['normal_range'] or 'N/A'} | **Units:** {test['units'] or 'N/A'}")
+                        st.markdown(f"**Description:** {test['description'] or 'N/A'}")
+                        st.markdown(f"**Preparation Required:** {test['preparation_required'] or 'None'}")
+                        st.caption(f"Created by User ID: {test['created_by'] or 'N/A'} | Internal ID: {test['id']}") # Corrected test_id to test['id']
+
+                    with col_actions:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("Edit", key=f"edit_lt_{test['id']}", use_container_width=True):
+                            st.session_state.edit_lab_test_id = test['id']
+                            if 'action_lab_test_id' in st.session_state:
+                                del st.session_state.action_lab_test_id
+                            st.rerun()
+
+                        action_button_text = "⚠️ Deactivate" if test['is_active'] else "✅ Restore" # Corrected is_active to test['is_active']
+                        if st.button(action_button_text, key=f"action_lt_{test['id']}", use_container_width=True):
+                            st.session_state.action_lab_test_id = test['id']
+                            st.session_state.action_lab_test_current_status = test['is_active'] # Corrected is_active
+                            if 'edit_lab_test_id' in st.session_state:
+                                del st.session_state.edit_lab_test_id
+                            st.rerun()
+                else: # Doctor or Assistant - display details directly
                     st.markdown(f"**Normal Range:** {test['normal_range'] or 'N/A'} | **Units:** {test['units'] or 'N/A'}")
                     st.markdown(f"**Description:** {test['description'] or 'N/A'}")
                     st.markdown(f"**Preparation Required:** {test['preparation_required'] or 'None'}")
-                    st.caption(f"Created by User ID: {test['created_by'] or 'N/A'} | Internal ID: {test_id}")
-                if is_super_admin and col_actions:
-                    with col_actions:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("Edit", key=f"edit_lt_{test_id}", use_container_width=True):
-                            st.session_state.edit_lab_test_id = test_id
-                            if 'action_lab_test_id' in st.session_state: del st.session_state.action_lab_test_id
-                            st.rerun()
-                        action_button_text = "⚠️ Deactivate" if is_active else "✅ Restore"
-                        if st.button(action_button_text, key=f"action_lt_{test_id}", use_container_width=True):
-                            st.session_state.action_lab_test_id = test_id
-                            st.session_state.action_lab_test_current_status = is_active
-                            if 'edit_lab_test_id' in st.session_state: del st.session_state.edit_lab_test_id
-                            st.rerun()
+                    st.caption(f"Created by User ID: {test['created_by'] or 'N/A'} | Internal ID: {test['id']}") # Corrected test_id
         if not lab_tests_df.empty: st.markdown("---")
     else: st.info("No lab tests found matching your criteria.")
 
