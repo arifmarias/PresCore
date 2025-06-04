@@ -1448,42 +1448,41 @@ def show_create_prescription():
 
     # --- Medications Section ---
     st.subheader("2. Medications")
-    col_med_select, col_med_dose, col_med_freq, col_med_dur = st.columns(4)
-
-    conn = db_manager.get_connection()
-    medications_list = pd.read_sql("SELECT id, name, strengths FROM medications WHERE is_active = 1 ORDER BY name", conn)
-    conn.close()
-    medication_options = {f"{row['name']} ({row['strengths'] or 'N/A'})": row['id'] for _, row in medications_list.iterrows()}
-
-    with col_med_select:
-        selected_med_name = st.selectbox("Select Medication", list(medication_options.keys()), index=None, key="med_select")
-    with col_med_dose:
-        dosage = st.text_input("Dosage", key="med_dosage")
-    with col_med_freq:
-        frequency = st.text_input("Frequency", key="med_frequency")
-    with col_med_dur:
-        duration = st.text_input("Duration", key="med_duration")
     
-    med_instructions = st.text_input("Instructions (e.g., before/after food)", key="med_instructions")
+    with st.form(key="add_medication_item_form", clear_on_submit=True):
+        col_med_select, col_med_dose, col_med_freq, col_med_dur = st.columns(4)
 
-    if st.button("Add Medication to Prescription", key="add_med_button"):
-        if selected_med_name and dosage and frequency and duration:
-            med_id = medication_options[selected_med_name]
-            med_name_display = selected_med_name # Use the display name which includes strength for clarity
-            
-            st.session_state.prescription_medications.append({
-                "id": med_id, "name": med_name_display, "dosage": dosage,
-                "frequency": frequency, "duration": duration, "instructions": med_instructions
-            })
-            # Clear inputs for next medication
-            # The selectbox (med_select) will reset/retain value based on Streamlit's default behavior on rerun
-            if 'med_dosage' in st.session_state: st.session_state.med_dosage = ""
-            if 'med_frequency' in st.session_state: st.session_state.med_frequency = ""
-            if 'med_duration' in st.session_state: st.session_state.med_duration = ""
-            if 'med_instructions' in st.session_state: st.session_state.med_instructions = ""
-            st.rerun()
-        else:
-            st.error("Please fill in Medication, Dosage, Frequency, and Duration.")
+        conn = db_manager.get_connection()
+        medications_list = pd.read_sql("SELECT id, name, strengths FROM medications WHERE is_active = 1 ORDER BY name", conn)
+        conn.close()
+        medication_options = {f"{row['name']} ({row['strengths'] or 'N/A'})": row['id'] for _, row in medications_list.iterrows()}
+
+        with col_med_select:
+            selected_med_name = st.selectbox("Select Medication", list(medication_options.keys()), index=None, key="med_select")
+        with col_med_dose:
+            dosage = st.text_input("Dosage", key="med_dosage")
+        with col_med_freq:
+            frequency = st.text_input("Frequency", key="med_frequency")
+        with col_med_dur:
+            duration = st.text_input("Duration", key="med_duration")
+
+        med_instructions = st.text_input("Instructions (e.g., before/after food)", key="med_instructions")
+
+        add_med_submit_button = st.form_submit_button("Add Medication to Prescription")
+
+        if add_med_submit_button:
+            if selected_med_name and dosage and frequency and duration:
+                med_id = medication_options[selected_med_name]
+                med_name_display = selected_med_name # Use the display name which includes strength for clarity
+
+                st.session_state.prescription_medications.append({
+                    "id": med_id, "name": med_name_display, "dosage": dosage,
+                    "frequency": frequency, "duration": duration, "instructions": med_instructions
+                })
+                # Manual clearing of session state for inputs is removed due to clear_on_submit=True
+                st.rerun()
+            else:
+                st.error("Please fill in Medication, Dosage, Frequency, and Duration.")
 
     if st.session_state.prescription_medications:
         st.markdown("**Current Medications in Prescription:**")
@@ -1499,34 +1498,36 @@ def show_create_prescription():
 
     # --- Lab Tests Section ---
     st.subheader("3. Lab Tests")
-    col_lab_select, col_lab_urgency = st.columns(2)
 
-    conn = db_manager.get_connection()
-    lab_tests_list = pd.read_sql("SELECT id, test_name FROM lab_tests WHERE is_active = 1 ORDER BY test_name", conn)
-    conn.close()
-    lab_test_options = {row['test_name']: row['id'] for _, row in lab_tests_list.iterrows()}
+    with st.form(key="add_lab_test_item_form", clear_on_submit=True):
+        col_lab_select, col_lab_urgency = st.columns(2)
 
-    with col_lab_select:
-        selected_lab_test_name = st.selectbox("Select Lab Test", list(lab_test_options.keys()), index=None, key="lab_select")
-    with col_lab_urgency:
-        lab_urgency = st.selectbox("Urgency", ["Routine", "Urgent", "STAT"], key="lab_urgency")
+        conn = db_manager.get_connection()
+        lab_tests_list = pd.read_sql("SELECT id, test_name FROM lab_tests WHERE is_active = 1 ORDER BY test_name", conn)
+        conn.close()
+        lab_test_options = {row['test_name']: row['id'] for _, row in lab_tests_list.iterrows()}
 
-    lab_instructions = st.text_input("Instructions for Lab Test", key="lab_instructions")
+        with col_lab_select:
+            selected_lab_test_name = st.selectbox("Select Lab Test", list(lab_test_options.keys()), index=None, key="lab_select")
+        with col_lab_urgency:
+            lab_urgency = st.selectbox("Urgency", ["Routine", "Urgent", "STAT"], key="lab_urgency") # Default is "Routine"
 
-    if st.button("Add Lab Test to Prescription", key="add_lab_button"):
-        if selected_lab_test_name:
-            test_id = lab_test_options[selected_lab_test_name]
-            st.session_state.prescription_lab_tests.append({
-                "id": test_id, "name": selected_lab_test_name,
-                "urgency": lab_urgency, "instructions": lab_instructions
-            })
-            # Clear inputs
-            # The selectbox (lab_select) will reset/retain value based on Streamlit's default behavior on rerun
-            if 'lab_urgency' in st.session_state: st.session_state.lab_urgency = "Routine" # Reset to default
-            if 'lab_instructions' in st.session_state: st.session_state.lab_instructions = ""
-            st.rerun()
-        else:
-            st.error("Please select a Lab Test.")
+        lab_instructions = st.text_input("Instructions for Lab Test", key="lab_instructions")
+
+        add_lab_submit_button = st.form_submit_button("Add Lab Test to Prescription")
+
+        if add_lab_submit_button:
+            if selected_lab_test_name:
+                test_id = lab_test_options[selected_lab_test_name]
+                st.session_state.prescription_lab_tests.append({
+                    "id": test_id, "name": selected_lab_test_name,
+                    "urgency": lab_urgency, "instructions": lab_instructions
+                })
+                # Manual clearing of session state for inputs is removed due to clear_on_submit=True
+                # For selectbox 'lab_urgency', clear_on_submit will reset it to its initial default ("Routine")
+                st.rerun()
+            else:
+                st.error("Please select a Lab Test.")
 
     if st.session_state.prescription_lab_tests:
         st.markdown("**Current Lab Tests in Prescription:**")
