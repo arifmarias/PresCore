@@ -2196,5 +2196,488 @@ def main():
         st.error(f"An error occurred: {str(e)}")
         st.info("Please try refreshing the page or contact support if the problem persists.")
 
+# --- Medication Database Management START ---
+def _display_medications_view(is_super_admin):
+    st.subheader("Medication List")
+
+    # Filters: Search, Status, Controlled Status
+    col_search, col_filter_status, col_filter_controlled = st.columns([2,1,1])
+    with col_search:
+        search_term = st.text_input("Search by Name, Generic Name, Brand Names, or Drug Class...", key="med_view_search")
+    with col_filter_status:
+        status_filter = st.selectbox("Filter by Status", ["Active", "Inactive", "All"], key="med_view_status_filter", index=0)
+    with col_filter_controlled:
+        controlled_filter = st.selectbox("Filter by Controlled Status", ["All", "Controlled", "Not Controlled"], key="med_view_controlled_filter", index=0)
+
+    # Construct SQL query
+    query = """SELECT id, name, generic_name, brand_names, drug_class, dosage_forms, strengths,
+                      indications, contraindications, side_effects, interactions,
+                      is_controlled, is_favorite, created_by, is_active
+               FROM medications"""
+    params = []
+    conditions = []
+
+    if status_filter == "Active":
+        conditions.append("is_active = 1")
+    elif status_filter == "Inactive":
+        conditions.append("is_active = 0")
+
+    if controlled_filter == "Controlled":
+        conditions.append("is_controlled = 1")
+    elif controlled_filter == "Not Controlled":
+        conditions.append("is_controlled = 0")
+
+    if search_term:
+        like_term = f"%{search_term}%"
+        search_clause = "(name LIKE ? OR generic_name LIKE ? OR brand_names LIKE ? OR drug_class LIKE ?)"
+        conditions.append(search_clause)
+        params.extend([like_term] * 4)
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY name ASC"
+
+    conn = db_manager.get_connection()
+    medications_df = pd.read_sql(query, conn, params=params)
+    conn.close()
+
+    if not medications_df.empty:
+        for index, med in medications_df.iterrows():
+            st.markdown("---")
+            med_id = med['id']
+            med_name = med['name']
+            is_active = med['is_active']
+            is_controlled = med['is_controlled']
+
+            status_text = "Active" if is_active else "Inactive"
+            status_color = "green" if is_active else "red"
+            controlled_text = " (Controlled)" if is_controlled else ""
+
+            expander_title = f"**{med_name}** ({med['generic_name'] or 'N/A'}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>{controlled_text}"
+
+            with st.expander(expander_title, unsafe_allow_html=True):
+                col_details, col_actions = st.columns([3,1]) if is_super_admin else (st.columns(1), None)
+
+                with col_details:
+                    st.markdown(f"**Brand Names:** {med['brand_names'] or 'N/A'}")
+                    st.markdown(f"**Drug Class:** {med['drug_class'] or 'N/A'}")
+                    st.markdown(f"**Dosage Forms:** {med['dosage_forms'] or 'N/A'} | **Strengths:** {med['strengths'] or 'N/A'}")
+                    st.markdown(f"**Indications:** {med['indications'] or 'N/A'}")
+                    st.markdown(f"**Contraindications:** {med['contraindications'] or 'N/A'}")
+                    st.markdown(f"**Side Effects:** {med['side_effects'] or 'N/A'}")
+                    st.markdown(f"**Interactions:** {med['interactions'] or 'N/A'}")
+                    st.caption(f"Favorite: {'Yes' if med['is_favorite'] else 'No'} | Created by User ID: {med['created_by'] or 'N/A'} | Internal ID: {med_id}")
+
+                if is_super_admin and col_actions:
+                    with col_actions:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("Edit", key=f"edit_med_{med_id}", use_container_width=True):
+                            st.session_state.edit_medication_id = med_id
+                            if 'action_medication_id' in st.session_state: # Clear other action
+                                del st.session_state.action_medication_id
+                            st.rerun()
+
+                        action_button_text = "⚠️ Deactivate" if is_active else "✅ Restore"
+                        if st.button(action_button_text, key=f"action_med_{med_id}", use_container_width=True):
+                            st.session_state.action_medication_id = med_id
+                            st.session_state.action_medication_current_status = is_active
+                            if 'edit_medication_id' in st.session_state: # Clear other action
+                                del st.session_state.edit_medication_id
+                            st.rerun()
+        if not medications_df.empty: st.markdown("---")
+    else:
+        st.info("No medications found matching your criteria.")
+
+    if is_super_admin:
+        if 'edit_medication_id' in st.session_state and st.session_state.edit_medication_id is not None:
+            _display_edit_medication_form(st.session_state.edit_medication_id)
+        elif 'action_medication_id' in st.session_state and st.session_state.action_medication_id is not None:
+            _confirm_and_action_medication(st.session_state.action_medication_id, st.session_state.action_medication_current_status)
+
+def _display_add_medication_form():
+    st.subheader("Add New Medication Record")
+    with st.form("add_medication_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Medication Name*")
+            generic_name = st.text_input("Generic Name")
+            brand_names = st.text_input("Brand Names (comma-separated)")
+            drug_class = st.text_input("Drug Class")
+            dosage_forms = st.text_input("Dosage Forms (e.g., Tablet, Capsule)")
+            strengths = st.text_input("Strengths (e.g., 10mg, 20mg/5ml)")
+        with col2:
+            indications = st.text_area("Indications")
+            contraindications = st.text_area("Contraindications")
+            side_effects = st.text_area("Common Side Effects")
+            interactions = st.text_area("Drug Interactions")
+            is_controlled = st.checkbox("Is Controlled Substance?")
+            is_favorite = st.checkbox("Mark as Favorite?")
+
+        submit_button = st.form_submit_button("Add Medication")
+
+        if submit_button:
+            if not name.strip():
+                st.error("Medication Name is a required field.")
+            else:
+                try:
+                    conn = db_manager.get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT INTO medications (name, generic_name, brand_names, drug_class, dosage_forms, strengths,
+                                               indications, contraindications, side_effects, interactions,
+                                               is_controlled, is_favorite, created_by, is_active)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """, (name, generic_name, brand_names, drug_class, dosage_forms, strengths,
+                          indications, contraindications, side_effects, interactions,
+                          is_controlled, is_favorite, st.session_state.user['id']))
+                    conn.commit()
+                    new_med_id = cursor.lastrowid
+                    conn.close()
+                    log_activity(st.session_state.user['id'], 'create_medication', 'medication', new_med_id, metadata={"name": name})
+                    st.success(f"Medication '{name}' added successfully!")
+                    # No st.rerun() here, clear_on_submit=True handles form reset. View tab will show new item on next interaction.
+                except Exception as e:
+                    st.error(f"Error adding medication: {str(e)}")
+
+def _display_edit_medication_form(medication_id):
+    conn = db_manager.get_connection()
+    med_data_series = pd.read_sql("SELECT * FROM medications WHERE id = ?", conn, params=(medication_id,))
+    conn.close()
+
+    if med_data_series.empty:
+        st.error("Medication not found or already deleted. Please refresh.")
+        st.session_state.edit_medication_id = None
+        st.rerun()
+        return
+
+    med_data = med_data_series.iloc[0].to_dict()
+
+    st.subheader(f"Edit Medication: {med_data['name']}")
+    with st.form(key=f"edit_med_form_{medication_id}"):
+        col1, col2 = st.columns(2)
+        with col1:
+            new_name = st.text_input("Medication Name*", value=med_data['name'])
+            new_generic_name = st.text_input("Generic Name", value=med_data['generic_name'])
+            new_brand_names = st.text_input("Brand Names", value=med_data['brand_names'])
+            new_drug_class = st.text_input("Drug Class", value=med_data['drug_class'])
+            new_dosage_forms = st.text_input("Dosage Forms", value=med_data['dosage_forms'])
+            new_strengths = st.text_input("Strengths", value=med_data['strengths'])
+        with col2:
+            new_indications = st.text_area("Indications", value=med_data['indications'])
+            new_contraindications = st.text_area("Contraindications", value=med_data['contraindications'])
+            new_side_effects = st.text_area("Side Effects", value=med_data['side_effects'])
+            new_interactions = st.text_area("Interactions", value=med_data['interactions'])
+            new_is_controlled = st.checkbox("Is Controlled Substance?", value=bool(med_data['is_controlled']))
+            new_is_favorite = st.checkbox("Mark as Favorite?", value=bool(med_data['is_favorite']))
+            new_is_active = st.checkbox("Is Active?", value=bool(med_data['is_active']))
+
+        col_save, col_cancel, col_empty = st.columns([1,1,5])
+        with col_save:
+            submit_button = st.form_submit_button("Save Changes")
+        with col_cancel:
+            if st.form_submit_button("Cancel", type="secondary"):
+                st.session_state.edit_medication_id = None
+                st.rerun()
+
+        if submit_button:
+            if not new_name.strip():
+                st.error("Medication Name is required.")
+            else:
+                updated_fields_map = {
+                    "name": new_name, "generic_name": new_generic_name, "brand_names": new_brand_names,
+                    "drug_class": new_drug_class, "dosage_forms": new_dosage_forms, "strengths": new_strengths,
+                    "indications": new_indications, "contraindications": new_contraindications,
+                    "side_effects": new_side_effects, "interactions": new_interactions,
+                    "is_controlled": new_is_controlled, "is_favorite": new_is_favorite, "is_active": new_is_active
+                }
+
+                fields_to_update = {}
+                for key, new_value in updated_fields_map.items():
+                    old_value = med_data.get(key)
+                    if isinstance(new_value, bool):
+                        if bool(old_value) != new_value:
+                            fields_to_update[key] = new_value
+                    elif str(old_value or '') != str(new_value or ''):
+                        fields_to_update[key] = new_value
+
+                if not fields_to_update:
+                    st.info("No changes detected.")
+                    st.session_state.edit_medication_id = None
+                    st.rerun()
+                else:
+                    try:
+                        conn_update = db_manager.get_connection()
+                        cursor = conn_update.cursor()
+                        set_clause = ", ".join([f"{key} = ?" for key in fields_to_update.keys()])
+                        values = list(fields_to_update.values())
+                        values.append(medication_id)
+                        cursor.execute(f"UPDATE medications SET {set_clause} WHERE id = ?", tuple(values))
+                        conn_update.commit()
+                        conn_update.close()
+                        log_activity(st.session_state.user['id'], 'update_medication', 'medication', medication_id, metadata={"updated_fields": list(fields_to_update.keys())})
+                        st.success(f"Medication '{new_name}' updated successfully!")
+                        st.session_state.edit_medication_id = None
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error updating medication: {str(e)}")
+
+def _confirm_and_action_medication(medication_id, is_currently_active):
+    action_verb = "Deactivate" if is_currently_active else "Restore"
+    action_desc = "deactivating" if is_currently_active else "restoring"
+
+    conn = db_manager.get_connection()
+    med_name_series = pd.read_sql("SELECT name FROM medications WHERE id = ?", conn, params=(medication_id,))
+    conn.close()
+
+    if med_name_series.empty:
+        st.error("Medication not found. It might have been deleted by another user. Refreshing list.")
+        st.session_state.action_medication_id = None
+        st.rerun()
+        return
+
+    med_name = med_name_series.iloc[0]['name']
+
+    st.subheader(f"{action_verb} Medication: {med_name}")
+    st.markdown(f"Are you sure you want to {action_verb.lower()} medication **'{med_name}'** (ID: {medication_id})?")
+
+    col1, col2, _ = st.columns([1,1,3])
+    with col1:
+        if st.button(f"Yes, {action_verb}", key=f"confirm_action_med_{medication_id}", type="primary"):
+            try:
+                conn_action = db_manager.get_connection()
+                cursor = conn_action.cursor()
+                new_status = 0 if is_currently_active else 1
+                cursor.execute("UPDATE medications SET is_active = ? WHERE id = ?", (new_status, medication_id))
+                conn_action.commit()
+                conn_action.close()
+                log_activity(st.session_state.user['id'], f'{action_desc}_medication', 'medication', medication_id, metadata={"name": med_name, "new_status": "active" if new_status else "inactive"})
+                st.success(f"Medication '{med_name}' successfully {action_desc}d.")
+                st.session_state.action_medication_id = None
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error {action_desc} medication: {str(e)}")
+    with col2:
+        if st.button("Cancel", key=f"cancel_action_med_{medication_id}", type="secondary"):
+            st.session_state.action_medication_id = None
+            st.rerun()
+
+def show_medication_database():
+    st.markdown('<div class="main-header"><h1>💊 Medication Database</h1></div>', unsafe_allow_html=True)
+    user_type = st.session_state.user['user_type']
+
+    if user_type == 'super_admin':
+        if 'edit_medication_id' not in st.session_state:
+            st.session_state.edit_medication_id = None
+        if 'action_medication_id' not in st.session_state:
+            st.session_state.action_medication_id = None
+        # action_medication_current_status is set when action_medication_id is set.
+
+        if st.session_state.edit_medication_id is None and st.session_state.action_medication_id is None:
+            view_tab, add_tab = st.tabs(["View Medications", "Add New Medication"])
+            with view_tab:
+                _display_medications_view(is_super_admin=True)
+            with add_tab:
+                _display_add_medication_form()
+        elif st.session_state.edit_medication_id is not None:
+            _display_edit_medication_form(st.session_state.edit_medication_id)
+        elif st.session_state.action_medication_id is not None:
+             _confirm_and_action_medication(st.session_state.action_medication_id, st.session_state.action_medication_current_status)
+    else:
+        _display_medications_view(is_super_admin=False)
+# --- Medication Database Management END ---
+
+# --- Lab Tests Database Management START ---
+def _display_lab_tests_view(is_super_admin):
+    st.subheader("Lab Test List")
+
+    col_search, col_filter_status, col_filter_category = st.columns([2,1,1])
+    with col_search:
+        search_term = st.text_input("Search by Test Name, Category, or Description...", key="lt_view_search")
+    with col_filter_status:
+        status_filter = st.selectbox("Filter by Status", ["Active", "Inactive", "All"], key="lt_status_filter", index=0)
+
+    conn_cat = db_manager.get_connection()
+    try:
+        categories_df = pd.read_sql("SELECT DISTINCT test_category FROM lab_tests WHERE test_category IS NOT NULL ORDER BY test_category ASC", conn_cat)
+        categories = categories_df['test_category'].tolist()
+    except Exception as e:
+        st.error(f"Error fetching categories: {e}")
+        categories = []
+    finally:
+        conn_cat.close()
+
+    with col_filter_category:
+        category_filter = st.selectbox("Filter by Category", ["All"] + categories, key="lt_category_filter")
+
+    query = """SELECT id, test_name, test_category, normal_range, units, description,
+                      preparation_required, created_by, is_active
+               FROM lab_tests"""
+    params = []
+    conditions = []
+
+    if status_filter == "Active": conditions.append("is_active = 1")
+    elif status_filter == "Inactive": conditions.append("is_active = 0")
+    if category_filter != "All": conditions.append("test_category = ?"); params.append(category_filter)
+
+    if search_term:
+        like_term = f"%{search_term}%"
+        search_clause = "(test_name LIKE ? OR test_category LIKE ? OR description LIKE ?)"
+        conditions.append(search_clause)
+        params.extend([like_term] * 3)
+
+    if conditions: query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY test_name ASC"
+
+    conn = db_manager.get_connection()
+    lab_tests_df = pd.read_sql(query, conn, params=params)
+    conn.close()
+
+    if not lab_tests_df.empty:
+        for index, test in lab_tests_df.iterrows():
+            st.markdown("---")
+            test_id = test['id']; test_name = test['test_name']; is_active = test['is_active']
+            status_text = "Active" if is_active else "Inactive"; status_color = "green" if is_active else "red"
+            expander_title = f"**{test_name}** ({test['test_category'] or 'N/A'}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>"
+            with st.expander(expander_title, unsafe_allow_html=True):
+                col_details, col_actions = st.columns([3,1]) if is_super_admin else (st.columns(1), None)
+                with col_details:
+                    st.markdown(f"**Normal Range:** {test['normal_range'] or 'N/A'} | **Units:** {test['units'] or 'N/A'}")
+                    st.markdown(f"**Description:** {test['description'] or 'N/A'}")
+                    st.markdown(f"**Preparation Required:** {test['preparation_required'] or 'None'}")
+                    st.caption(f"Created by User ID: {test['created_by'] or 'N/A'} | Internal ID: {test_id}")
+                if is_super_admin and col_actions:
+                    with col_actions:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("Edit", key=f"edit_lt_{test_id}", use_container_width=True):
+                            st.session_state.edit_lab_test_id = test_id
+                            if 'action_lab_test_id' in st.session_state: del st.session_state.action_lab_test_id
+                            st.rerun()
+                        action_button_text = "⚠️ Deactivate" if is_active else "✅ Restore"
+                        if st.button(action_button_text, key=f"action_lt_{test_id}", use_container_width=True):
+                            st.session_state.action_lab_test_id = test_id
+                            st.session_state.action_lab_test_current_status = is_active
+                            if 'edit_lab_test_id' in st.session_state: del st.session_state.edit_lab_test_id
+                            st.rerun()
+        if not lab_tests_df.empty: st.markdown("---")
+    else: st.info("No lab tests found matching your criteria.")
+
+def _display_add_lab_test_form():
+    st.subheader("Add New Lab Test Record")
+    with st.form("add_lab_test_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            test_name = st.text_input("Test Name*")
+            test_category = st.text_input("Test Category*")
+            normal_range = st.text_input("Normal Range")
+            units = st.text_input("Units")
+        with col2:
+            description = st.text_area("Description")
+            preparation_required = st.text_area("Preparation Required")
+        submit_button = st.form_submit_button("Add Lab Test")
+        if submit_button:
+            if not test_name.strip() or not test_category.strip():
+                st.error("Test Name and Test Category are required fields.")
+            else:
+                try:
+                    conn = db_manager.get_connection(); cursor = conn.cursor()
+                    cursor.execute("INSERT INTO lab_tests (test_name, test_category, normal_range, units, description, preparation_required, created_by, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+                                   (test_name, test_category, normal_range, units, description, preparation_required, st.session_state.user['id']))
+                    conn.commit(); new_test_id = cursor.lastrowid; conn.close()
+                    log_activity(st.session_state.user['id'], 'create_lab_test', 'lab_test', new_test_id, metadata={"name": test_name})
+                    st.success(f"Lab Test '{test_name}' added successfully!")
+                except Exception as e: st.error(f"Error adding lab test: {str(e)}")
+
+def _display_edit_lab_test_form(lab_test_id):
+    conn = db_manager.get_connection();
+    lt_data_series = pd.read_sql("SELECT * FROM lab_tests WHERE id = ?", conn, params=(lab_test_id,))
+    conn.close()
+    if lt_data_series.empty:
+        st.error("Lab Test not found or already deleted. Please refresh.")
+        st.session_state.edit_lab_test_id = None; st.rerun(); return
+    lt_data = lt_data_series.iloc[0].to_dict()
+    st.subheader(f"Edit Lab Test: {lt_data['test_name']}")
+    with st.form(key=f"edit_lt_form_{lab_test_id}"):
+        col1, col2 = st.columns(2)
+        with col1:
+            new_test_name = st.text_input("Test Name*", value=lt_data['test_name'])
+            new_test_category = st.text_input("Test Category*", value=lt_data['test_category'])
+            new_normal_range = st.text_input("Normal Range", value=lt_data['normal_range'])
+            new_units = st.text_input("Units", value=lt_data['units'])
+        with col2:
+            new_description = st.text_area("Description", value=lt_data['description'])
+            new_preparation_required = st.text_area("Preparation Required", value=lt_data['preparation_required'])
+            new_is_active = st.checkbox("Is Active?", value=bool(lt_data['is_active']))
+        col_save, col_cancel, _ = st.columns([1,1,5])
+        with col_save: submit_button = st.form_submit_button("Save Changes")
+        with col_cancel:
+            if st.form_submit_button("Cancel", type="secondary"):
+                st.session_state.edit_lab_test_id = None; st.rerun()
+        if submit_button:
+            if not new_test_name.strip() or not new_test_category.strip():
+                st.error("Test Name and Test Category are required.")
+            else:
+                updated_fields = {"test_name": new_test_name, "test_category": new_test_category, "normal_range": new_normal_range, "units": new_units, "description": new_description, "preparation_required": new_preparation_required, "is_active": new_is_active}
+                changed_log = {k: v for k,v in updated_fields.items() if str(lt_data.get(k) or '') != str(v or '')}
+                if not changed_log:
+                    st.info("No changes detected.")
+                    st.session_state.edit_lab_test_id = None; st.rerun()
+                else:
+                    try:
+                        conn_update = db_manager.get_connection(); cursor = conn_update.cursor()
+                        set_clause = ", ".join([f"{key} = ?" for key in changed_log.keys()]); values = list(changed_log.values()); values.append(lab_test_id)
+                        cursor.execute(f"UPDATE lab_tests SET {set_clause} WHERE id = ?", tuple(values)); conn_update.commit(); conn_update.close()
+                        log_activity(st.session_state.user['id'], 'update_lab_test', 'lab_test', lab_test_id, metadata={"updated_fields": list(changed_log.keys())})
+                        st.success(f"Lab Test '{new_test_name}' updated successfully!"); st.session_state.edit_lab_test_id = None; st.rerun()
+                    except Exception as e: st.error(f"Error updating lab test: {str(e)}")
+
+def _confirm_and_action_lab_test(lab_test_id, is_currently_active):
+    action_verb = "Deactivate" if is_currently_active else "Restore"; action_desc = "deactivating" if is_currently_active else "restoring"
+    conn = db_manager.get_connection(); lt_name_series = pd.read_sql("SELECT test_name FROM lab_tests WHERE id = ?", conn, params=(lab_test_id,)); conn.close()
+    if lt_name_series.empty:
+        st.error("Lab Test not found or already deleted. Refreshing list.")
+        st.session_state.action_lab_test_id = None; st.rerun(); return
+    lt_name = lt_name_series.iloc[0]['test_name']
+    st.subheader(f"{action_verb} Lab Test: {lt_name}")
+    st.markdown(f"Are you sure you want to {action_verb.lower()} lab test **'{lt_name}'** (ID: {lab_test_id})?")
+    col1, col2, _ = st.columns([1,1,3])
+    with col1:
+        if st.button(f"Yes, {action_verb}", key=f"confirm_action_lt_{lab_test_id}", type="primary"):
+            try:
+                conn_action = db_manager.get_connection(); cursor = conn_action.cursor(); new_status = 0 if is_currently_active else 1
+                cursor.execute("UPDATE lab_tests SET is_active = ? WHERE id = ?", (new_status, lab_test_id)); conn_action.commit(); conn_action.close()
+                log_activity(st.session_state.user['id'], f'{action_desc}_lab_test', 'lab_test', lab_test_id, metadata={"name": lt_name, "new_status": "active" if new_status else "inactive"})
+                st.success(f"Lab Test '{lt_name}' successfully {action_desc}d."); st.session_state.action_lab_test_id = None; st.rerun()
+            except Exception as e: st.error(f"Error {action_desc} lab test: {str(e)}")
+    with col2:
+        if st.button("Cancel", key=f"cancel_action_lt_{lab_test_id}", type="secondary"):
+            st.session_state.action_lab_test_id = None; st.rerun()
+
+def show_lab_tests_database():
+    st.markdown('<div class="main-header"><h1>🔬 Lab Tests Database</h1></div>', unsafe_allow_html=True)
+    user_type = st.session_state.user['user_type']
+
+    if user_type == 'super_admin':
+        # Initialize session state keys if they don't exist for safety
+        if 'edit_lab_test_id' not in st.session_state:
+            st.session_state.edit_lab_test_id = None
+        if 'action_lab_test_id' not in st.session_state:
+            st.session_state.action_lab_test_id = None
+        # action_lab_test_current_status is set when action_lab_test_id is set
+
+        # Logic to display tabs or specific forms based on session state
+        if st.session_state.edit_lab_test_id is not None:
+            _display_edit_lab_test_form(st.session_state.edit_lab_test_id)
+        elif st.session_state.action_lab_test_id is not None:
+            _confirm_and_action_lab_test(st.session_state.action_lab_test_id, st.session_state.get('action_lab_test_current_status', False))
+        else:
+            view_tab, add_tab = st.tabs(["View Lab Tests", "Add New Lab Test"])
+            with view_tab:
+                _display_lab_tests_view(is_super_admin=True)
+            with add_tab:
+                _display_add_lab_test_form()
+    else: # Doctor or Assistant
+        _display_lab_tests_view(is_super_admin=False)
+# --- Lab Tests Database Management END ---
+
 if __name__ == "__main__":
     main()
