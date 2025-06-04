@@ -1007,7 +1007,7 @@ def show_patient_management():
                 status_color = "green" if patient['is_active'] else "red"
                 expander_title = f"👤 {patient['first_name']} {patient['last_name']} ({patient['patient_id']}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>"
 
-                with st.expander(expander_title, unsafe_allow_html=True):
+                with st.expander(expander_title): # unsafe_allow_html removed
                     col_details, col_actions = st.columns([3,1]) if can_manage_patients else (st.columns(1), None)
 
                     with col_details:
@@ -2255,7 +2255,7 @@ def _display_medications_view(is_super_admin):
 
             expander_title = f"**{med_name}** ({med['generic_name'] or 'N/A'}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>{controlled_text}"
 
-            with st.expander(expander_title, unsafe_allow_html=True):
+            with st.expander(expander_title): # unsafe_allow_html removed
                 col_details, col_actions = st.columns([3,1]) if is_super_admin else (st.columns(1), None)
 
                 with col_details:
@@ -2538,7 +2538,7 @@ def _display_lab_tests_view(is_super_admin):
             test_id = test['id']; test_name = test['test_name']; is_active = test['is_active']
             status_text = "Active" if is_active else "Inactive"; status_color = "green" if is_active else "red"
             expander_title = f"**{test_name}** ({test['test_category'] or 'N/A'}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>"
-            with st.expander(expander_title, unsafe_allow_html=True):
+            with st.expander(expander_title): # unsafe_allow_html removed
                 col_details, col_actions = st.columns([3,1]) if is_super_admin else (st.columns(1), None)
                 with col_details:
                     st.markdown(f"**Normal Range:** {test['normal_range'] or 'N/A'} | **Units:** {test['units'] or 'N/A'}")
