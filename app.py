@@ -671,6 +671,100 @@ def generate_prescription_id():
     random_num = random.randint(1000, 9999)
     return f"RX-{today}-{random_num:04d}"
 
+def display_ai_analysis(analysis_result):
+    if not analysis_result or not isinstance(analysis_result, dict):
+        st.info("No AI analysis data to display or data is not in the expected format.")
+        return
+
+    st.markdown("<div class='ai-analysis'>", unsafe_allow_html=True)
+    st.subheader("🔍 AI Drug Interaction Analysis Results")
+
+    # Overall Risk and Summary
+    overall_risk = analysis_result.get('overall_risk', 'N/A').capitalize()
+    summary = analysis_result.get('summary', 'No summary provided.')
+
+    risk_color_map = {"Low": "green", "Moderate": "orange", "High": "red"}
+    risk_color = risk_color_map.get(overall_risk, "normal") # default to normal if risk level unknown
+
+    st.markdown(f"**Overall Risk:** <span style='color:{risk_color}; font-weight:bold;'>{overall_risk}</span>", unsafe_allow_html=True)
+    st.markdown(f"**Summary:** {summary}")
+    st.markdown("---")
+
+    # Interactions
+    interactions = analysis_result.get('interactions', [])
+    if interactions:
+        st.markdown("#### 💊 Drug Interactions:")
+        for item in interactions:
+            drugs = ", ".join(item.get('drugs', ['N/A']))
+            severity = item.get('severity', 'N/A').capitalize()
+            description = item.get('description', 'N/A')
+            recommendation = item.get('recommendation', 'N/A')
+
+            exp_title = f"Interaction: {drugs} (Severity: {severity})"
+            with st.expander(exp_title):
+                st.markdown(f"- **Drugs Involved:** {drugs}")
+                st.markdown(f"- **Severity:** {severity}")
+                st.markdown(f"- **Description:** {description}")
+                st.markdown(f"- **Recommendation:** {recommendation}")
+        st.markdown("---")
+
+    # Allergies
+    allergies = analysis_result.get('allergies', [])
+    if allergies:
+        st.markdown("#### ⚠️ Allergy Concerns:")
+        for item in allergies:
+            drug = item.get('drug', 'N/A')
+            allergy_type = item.get('allergy', 'N/A')
+            risk = item.get('risk', 'N/A')
+            with st.expander(f"Allergy: {drug} with {allergy_type}"):
+                st.markdown(f"- **Drug:** {drug}")
+                st.markdown(f"- **Patient Allergy:** {allergy_type}")
+                st.markdown(f"- **Risk/Note:** {risk}")
+        st.markdown("---")
+
+    # Contraindications
+    contraindications = analysis_result.get('contraindications', [])
+    if contraindications:
+        st.markdown("#### ⛔ Contraindications (based on patient conditions):")
+        for item in contraindications:
+            drug = item.get('drug', 'N/A')
+            condition = item.get('condition', 'N/A')
+            risk = item.get('risk', 'N/A')
+            with st.expander(f"Contraindication: {drug} with {condition}"):
+                st.markdown(f"- **Drug:** {drug}")
+                st.markdown(f"- **Patient Condition:** {condition}")
+                st.markdown(f"- **Risk/Note:** {risk}")
+        st.markdown("---")
+
+    # Alternatives
+    alternatives = analysis_result.get('alternatives', [])
+    if alternatives:
+        st.markdown("#### 🔄 Suggested Alternatives:")
+        for item in alternatives:
+            instead_of = item.get('instead_of', 'N/A')
+            suggested = item.get('suggested', 'N/A')
+            reason = item.get('reason', 'N/A')
+            with st.expander(f"Alternative for {instead_of}: Suggest {suggested}"):
+                st.markdown(f"- **Original Drug:** {instead_of}")
+                st.markdown(f"- **Suggested Alternative:** {suggested}")
+                st.markdown(f"- **Reason:** {reason}")
+        st.markdown("---")
+
+    # Monitoring
+    monitoring = analysis_result.get('monitoring', [])
+    if monitoring:
+        st.markdown("#### 🔬 Recommended Monitoring:")
+        for item in monitoring:
+            parameter = item.get('parameter', 'N/A')
+            frequency = item.get('frequency', 'N/A')
+            reason = item.get('reason', 'N/A')
+            with st.expander(f"Monitor: {parameter} ({frequency})"):
+                st.markdown(f"- **Parameter to Monitor:** {parameter}")
+                st.markdown(f"- **Frequency:** {frequency}")
+                st.markdown(f"- **Reason:** {reason}")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
 # Authentication UI
 def show_login():
     st.markdown('<div class="main-header"><h1>🏥 MedScript Pro</h1><p>Medical Prescription Management System</p></div>', unsafe_allow_html=True)
