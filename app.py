@@ -1476,12 +1476,12 @@ def show_create_prescription():
                 "frequency": frequency, "duration": duration, "instructions": med_instructions
             })
             # Clear inputs for next medication
-            st.session_state.med_select = None # This might not work as expected for selectbox, needs unique key if we want to clear
-            st.session_state.med_dosage = ""
-            st.session_state.med_frequency = ""
-            st.session_state.med_duration = ""
-            st.session_state.med_instructions = ""
-            st.rerun() # Rerun to update list and clear some fields (selectbox might need specific handling)
+            # The selectbox (med_select) will reset/retain value based on Streamlit's default behavior on rerun
+            if 'med_dosage' in st.session_state: st.session_state.med_dosage = ""
+            if 'med_frequency' in st.session_state: st.session_state.med_frequency = ""
+            if 'med_duration' in st.session_state: st.session_state.med_duration = ""
+            if 'med_instructions' in st.session_state: st.session_state.med_instructions = ""
+            st.rerun()
         else:
             st.error("Please fill in Medication, Dosage, Frequency, and Duration.")
 
@@ -1521,9 +1521,9 @@ def show_create_prescription():
                 "urgency": lab_urgency, "instructions": lab_instructions
             })
             # Clear inputs
-            st.session_state.lab_select = None
-            st.session_state.lab_urgency = "Routine"
-            st.session_state.lab_instructions = ""
+            # The selectbox (lab_select) will reset/retain value based on Streamlit's default behavior on rerun
+            if 'lab_urgency' in st.session_state: st.session_state.lab_urgency = "Routine" # Reset to default
+            if 'lab_instructions' in st.session_state: st.session_state.lab_instructions = ""
             st.rerun()
         else:
             st.error("Please select a Lab Test.")
