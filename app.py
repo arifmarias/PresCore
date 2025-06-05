@@ -1089,8 +1089,13 @@ def show_patient_management():
 
     tab1, tab2 = st.tabs(["View Patients", "Add Patient"])
     
+    # Replace the "View Patients" tab section in show_patient_management() with this:
+
     with tab1:
         st.subheader("View and Manage Patients")
+
+        # Role check for edit/delete capabilities
+        can_manage_patients = st.session_state.user['user_type'] in ['super_admin', 'doctor']
 
         # Filters: Search, Status
         col_search, col_filter_status = st.columns([2,1])
@@ -1099,11 +1104,18 @@ def show_patient_management():
         with col_filter_status:
             patient_status_filter = st.selectbox("Filter by status", ["Active", "Inactive", "All"], key="patient_status_filter", index=0)
 
+        # Pagination settings
+        items_per_page = 10
+        
+        # Initialize page number in session state
+        if 'patient_page' not in st.session_state:
+            st.session_state.patient_page = 1
+
         # Build query based on status filter
         query = """
             SELECT id, patient_id, first_name, last_name, date_of_birth, gender, phone, email, address,
-                   allergies, medical_conditions, emergency_contact, insurance_info,
-                   created_at, DATETIME(created_at, '+5 hours', '+30 minutes') as created_at_ist, is_active
+                allergies, medical_conditions, emergency_contact, insurance_info,
+                created_at, DATETIME(created_at, '+5 hours', '+30 minutes') as created_at_ist, is_active
             FROM patients
         """
         params = []
@@ -1131,18 +1143,40 @@ def show_patient_management():
         conn = db_manager.get_connection()
         patients_df = pd.read_sql(query, conn, params=params)
         conn.close()
-        
+
         if not patients_df.empty:
-            for index, patient in patients_df.iterrows():
-                st.markdown("---")
-                #-----
+            # Calculate pagination
+            total_items = len(patients_df)
+            total_pages = (total_items - 1) // items_per_page + 1
+            
+            # Ensure current page is valid
+            if st.session_state.patient_page > total_pages:
+                st.session_state.patient_page = total_pages
+            if st.session_state.patient_page < 1:
+                st.session_state.patient_page = 1
+            
+            # Calculate start and end indices
+            start_idx = (st.session_state.patient_page - 1) * items_per_page
+            end_idx = min(start_idx + items_per_page, total_items)
+            
+            # Get current page items
+            current_page_patients = patients_df.iloc[start_idx:end_idx]
+            
+            # Display only basic info at top
+            st.info(f"👤 Showing {start_idx + 1}-{end_idx} of {total_items} patients (Page {st.session_state.patient_page} of {total_pages})")
+            
+            # Display patients for current page
+            for index, patient in current_page_patients.iterrows():
                 status_text = "Active" if patient['is_active'] else "Inactive"
                 status_emoji = "✅" if patient['is_active'] else "❌"
                 expander_title = f"👤 {patient['first_name']} {patient['last_name']} ({patient['patient_id']}) {status_emoji} {status_text}"
 
-
-                with st.expander(expander_title): # unsafe_allow_html removed
-                    col_details, col_actions = st.columns([3,1]) if can_manage_patients else (st.columns(1), None)
+                with st.expander(expander_title):
+                    if can_manage_patients:
+                        col_details, col_actions = st.columns([3,1])
+                    else:
+                        col_details = st.columns(1)[0]
+                        col_actions = None
 
                     with col_details:
                         st.markdown(f"**Internal ID:** {patient['id']}")
@@ -1168,24 +1202,49 @@ def show_patient_management():
                     
                     # Prescription history button (visible to super_admin and doctor)
                     if st.session_state.user['user_type'] in ['doctor', 'super_admin']:
-                        #---
                         if st.button(f"View Prescription History", key=f"history_{patient['patient_id']}"):
-                            # Set a session state to show history outside of expander
                             st.session_state.show_prescription_history = patient['patient_id']
                             st.rerun()
 
-            if not patients_df.empty:
-                st.markdown("---") # Final separator
+            # Pagination controls at bottom
+            st.markdown("---")
+            
+            # Main pagination controls
+            col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+            
+            with col1:
+                if st.button("⬅️ Previous", disabled=(st.session_state.patient_page <= 1), key="pt_prev"):
+                    st.session_state.patient_page -= 1
+                    st.rerun()
+            
+            with col2:
+                if st.button("Next ➡️", disabled=(st.session_state.patient_page >= total_pages), key="pt_next"):
+                    st.session_state.patient_page += 1
+                    st.rerun()
+            
+            with col3:
+                st.markdown(f"<div style='text-align: center; font-weight: bold;'>Page {st.session_state.patient_page} of {total_pages}</div>", unsafe_allow_html=True)
+            
+            with col4:
+                # Jump to page
+                target_page = st.number_input("Go to page:", min_value=1, max_value=total_pages, 
+                                            value=st.session_state.patient_page, key="pt_page_jump")
+            
+            with col5:
+                if st.button("Go", key="pt_go_page"):
+                    st.session_state.patient_page = target_page
+                    st.rerun()
 
-            # Handle Edit Patient action
-            if 'edit_patient_id' in st.session_state and st.session_state.edit_patient_id:
-                show_edit_patient_form(st.session_state.edit_patient_id)
-
-            # Handle Deactivate/Restore Patient action
-            if 'action_patient_id' in st.session_state and st.session_state.action_patient_id:
-                confirm_and_action_patient(st.session_state.action_patient_id, st.session_state.action_patient_current_status)
         else:
             st.info("No patients found matching your criteria.")
+
+        # Handle Edit Patient action
+        if 'edit_patient_id' in st.session_state and st.session_state.edit_patient_id:
+            show_edit_patient_form(st.session_state.edit_patient_id)
+
+        # Handle Deactivate/Restore Patient action
+        if 'action_patient_id' in st.session_state and st.session_state.action_patient_id:
+            confirm_and_action_patient(st.session_state.action_patient_id, st.session_state.action_patient_current_status)
     
     with tab2:
         st.subheader("Add New Patient")
@@ -2128,13 +2187,37 @@ def show_analytics():
                 ORDER BY count DESC
                 LIMIT 10
             """, conn, params=[st.session_state.user['id'], start_date.isoformat(), end_date.isoformat()])
-        
+
         if not top_medications.empty:
-            fig_bar = px.bar(top_medications, x='name', y='count',
-                            title='Top 10 Most Prescribed Medications',
-                            labels={'name': 'Medication', 'count': 'Times Prescribed'})
-            fig_bar.update_xaxis(tickangle=45)
-            st.plotly_chart(fig_bar, use_container_width=True)
+            try:
+                # Create the chart with proper Plotly syntax
+                fig_bar = px.bar(
+                    top_medications, 
+                    x='name', 
+                    y='count',
+                    title='Top 10 Most Prescribed Medications',
+                    labels={'name': 'Medication', 'count': 'Times Prescribed'}
+                )
+                
+                # Update layout instead of using update_xaxis
+                fig_bar.update_layout(
+                    xaxis_title="Medication",
+                    yaxis_title="Times Prescribed",
+                    xaxis={'tickangle': 45},
+                    showlegend=False,
+                    height=500
+                )
+                
+                # Display the chart
+                st.plotly_chart(fig_bar, use_container_width=True)
+                
+            except Exception as e:
+                st.error(f"Error creating medications chart: {str(e)}")
+                # Fallback: Display as table if chart fails
+                st.subheader("Top 10 Most Prescribed Medications (Table View)")
+                st.dataframe(top_medications, use_container_width=True)
+        else:
+            st.info("No medication prescription data available for the selected date range.")
     
     # Visit analytics for all user types
     st.subheader("🏥 Visit Analytics")
