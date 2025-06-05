@@ -2380,6 +2380,13 @@ def _display_medications_view(is_super_admin):
     with col_filter_controlled:
         controlled_filter = st.selectbox("Filter by Controlled Status", ["All", "Controlled", "Not Controlled"], key="med_view_controlled_filter", index=0)
 
+    # Pagination settings
+    items_per_page = 10
+    
+    # Initialize page number in session state
+    if 'medication_page' not in st.session_state:
+        st.session_state.medication_page = 1
+
     # Construct SQL query
     query = """SELECT id, name, generic_name, brand_names, drug_class, dosage_forms, strengths,
                       indications, contraindications, side_effects, interactions,
@@ -2413,20 +2420,40 @@ def _display_medications_view(is_super_admin):
     conn.close()
 
     if not medications_df.empty:
-        for index, med in medications_df.iterrows():
-            st.markdown("---")
+        # Calculate pagination
+        total_items = len(medications_df)
+        total_pages = (total_items - 1) // items_per_page + 1
+        
+        # Ensure current page is valid
+        if st.session_state.medication_page > total_pages:
+            st.session_state.medication_page = total_pages
+        if st.session_state.medication_page < 1:
+            st.session_state.medication_page = 1
+        
+        # Calculate start and end indices
+        start_idx = (st.session_state.medication_page - 1) * items_per_page
+        end_idx = min(start_idx + items_per_page, total_items)
+        
+        # Get current page items
+        current_page_medications = medications_df.iloc[start_idx:end_idx]
+        
+        # Display only basic info at top
+        st.info(f"📊 Showing {start_idx + 1}-{end_idx} of {total_items} medications (Page {st.session_state.medication_page} of {total_pages})")
+        
+        # Display medications for current page
+        for index, med in current_page_medications.iterrows():
             med_id = med['id']
             med_name = med['name']
             is_active = med['is_active']
             is_controlled = med['is_controlled']
 
             status_text = "Active" if is_active else "Inactive"
-            status_color = "green" if is_active else "red"
-            controlled_text = " (Controlled)" if is_controlled else ""
+            status_emoji = "✅" if is_active else "❌"
+            controlled_text = " 🔒" if is_controlled else ""
 
-            expander_title = f"**{med_name}** ({med['generic_name'] or 'N/A'}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>{controlled_text}"
+            expander_title = f"**{med_name}** ({med['generic_name'] or 'N/A'}) {status_emoji} {status_text}{controlled_text}"
 
-            with st.expander(expander_title): # unsafe_allow_html removed
+            with st.expander(expander_title):
                 if is_super_admin:
                     col_details, col_actions = st.columns([3,1])
                     with col_details:
@@ -2437,7 +2464,7 @@ def _display_medications_view(is_super_admin):
                         st.markdown(f"**Contraindications:** {med['contraindications'] or 'N/A'}")
                         st.markdown(f"**Side Effects:** {med['side_effects'] or 'N/A'}")
                         st.markdown(f"**Interactions:** {med['interactions'] or 'N/A'}")
-                        st.caption(f"Favorite: {'Yes' if med['is_favorite'] else 'No'} | Created by User ID: {med['created_by'] or 'N/A'} | Internal ID: {med['id']}") # Corrected med_id to med['id']
+                        st.caption(f"Favorite: {'Yes' if med['is_favorite'] else 'No'} | Created by User ID: {med['created_by'] or 'N/A'} | Internal ID: {med['id']}")
 
                     with col_actions:
                         st.markdown("<br>", unsafe_allow_html=True)
@@ -2447,10 +2474,10 @@ def _display_medications_view(is_super_admin):
                                 del st.session_state.action_medication_id
                             st.rerun()
 
-                        action_button_text = "⚠️ Deactivate" if med['is_active'] else "✅ Restore" # Corrected is_active to med['is_active']
+                        action_button_text = "⚠️ Deactivate" if med['is_active'] else "✅ Restore"
                         if st.button(action_button_text, key=f"action_med_{med['id']}", use_container_width=True):
                             st.session_state.action_medication_id = med['id']
-                            st.session_state.action_medication_current_status = med['is_active'] # Corrected is_active
+                            st.session_state.action_medication_current_status = med['is_active']
                             if 'edit_medication_id' in st.session_state:
                                 del st.session_state.edit_medication_id
                             st.rerun()
@@ -2462,8 +2489,37 @@ def _display_medications_view(is_super_admin):
                     st.markdown(f"**Contraindications:** {med['contraindications'] or 'N/A'}")
                     st.markdown(f"**Side Effects:** {med['side_effects'] or 'N/A'}")
                     st.markdown(f"**Interactions:** {med['interactions'] or 'N/A'}")
-                    st.caption(f"Favorite: {'Yes' if med['is_favorite'] else 'No'} | Created by User ID: {med['created_by'] or 'N/A'} | Internal ID: {med['id']}") # Corrected med_id
-        if not medications_df.empty: st.markdown("---")
+                    st.caption(f"Favorite: {'Yes' if med['is_favorite'] else 'No'} | Created by User ID: {med['created_by'] or 'N/A'} | Internal ID: {med['id']}")
+        
+        # Pagination controls at bottom
+        st.markdown("---")
+        
+        # Main pagination controls
+        col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+        
+        with col1:
+            if st.button("⬅️ Previous", disabled=(st.session_state.medication_page <= 1)):
+                st.session_state.medication_page -= 1
+                st.rerun()
+        
+        with col2:
+            if st.button("Next ➡️", disabled=(st.session_state.medication_page >= total_pages)):
+                st.session_state.medication_page += 1
+                st.rerun()
+        
+        with col3:
+            st.markdown(f"<div style='text-align: center; font-weight: bold;'>Page {st.session_state.medication_page} of {total_pages}</div>", unsafe_allow_html=True)
+        
+        with col4:
+            # Jump to page
+            target_page = st.number_input("Go to page:", min_value=1, max_value=total_pages, 
+                                        value=st.session_state.medication_page, key="med_page_jump")
+        
+        with col5:
+            if st.button("Go", key="med_go_page"):
+                st.session_state.medication_page = target_page
+                st.rerun()
+        
     else:
         st.info("No medications found matching your criteria.")
 
@@ -2688,15 +2744,26 @@ def _display_lab_tests_view(is_super_admin):
     with col_filter_category:
         category_filter = st.selectbox("Filter by Category", ["All"] + categories, key="lt_category_filter")
 
+    # Pagination settings
+    items_per_page = 10
+    
+    # Initialize page number in session state
+    if 'lab_test_page' not in st.session_state:
+        st.session_state.lab_test_page = 1
+
     query = """SELECT id, test_name, test_category, normal_range, units, description,
                       preparation_required, created_by, is_active
                FROM lab_tests"""
     params = []
     conditions = []
 
-    if status_filter == "Active": conditions.append("is_active = 1")
-    elif status_filter == "Inactive": conditions.append("is_active = 0")
-    if category_filter != "All": conditions.append("test_category = ?"); params.append(category_filter)
+    if status_filter == "Active": 
+        conditions.append("is_active = 1")
+    elif status_filter == "Inactive": 
+        conditions.append("is_active = 0")
+    if category_filter != "All": 
+        conditions.append("test_category = ?")
+        params.append(category_filter)
 
     if search_term:
         like_term = f"%{search_term}%"
@@ -2704,7 +2771,8 @@ def _display_lab_tests_view(is_super_admin):
         conditions.append(search_clause)
         params.extend([like_term] * 3)
 
-    if conditions: query += " WHERE " + " AND ".join(conditions)
+    if conditions: 
+        query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY test_name ASC"
 
     conn = db_manager.get_connection()
@@ -2712,19 +2780,45 @@ def _display_lab_tests_view(is_super_admin):
     conn.close()
 
     if not lab_tests_df.empty:
-        for index, test in lab_tests_df.iterrows():
-            st.markdown("---")
-            test_id = test['id']; test_name = test['test_name']; is_active = test['is_active']
-            status_text = "Active" if is_active else "Inactive"; status_color = "green" if is_active else "red"
-            expander_title = f"**{test_name}** ({test['test_category'] or 'N/A'}) - <span style='color:{status_color}; font-weight:bold;'>{status_text}</span>"
-            with st.expander(expander_title): # unsafe_allow_html removed
+        # Calculate pagination
+        total_items = len(lab_tests_df)
+        total_pages = (total_items - 1) // items_per_page + 1
+        
+        # Ensure current page is valid
+        if st.session_state.lab_test_page > total_pages:
+            st.session_state.lab_test_page = total_pages
+        if st.session_state.lab_test_page < 1:
+            st.session_state.lab_test_page = 1
+        
+        # Calculate start and end indices
+        start_idx = (st.session_state.lab_test_page - 1) * items_per_page
+        end_idx = min(start_idx + items_per_page, total_items)
+        
+        # Get current page items
+        current_page_tests = lab_tests_df.iloc[start_idx:end_idx]
+        
+        # Display only basic info at top
+        st.info(f"🔬 Showing {start_idx + 1}-{end_idx} of {total_items} lab tests (Page {st.session_state.lab_test_page} of {total_pages})")
+        
+        # Display lab tests for current page
+        for index, test in current_page_tests.iterrows():
+            test_id = test['id']
+            test_name = test['test_name']
+            is_active = test['is_active']
+            
+            status_text = "Active" if is_active else "Inactive"
+            status_emoji = "✅" if is_active else "❌"
+            
+            expander_title = f"**{test_name}** ({test['test_category'] or 'N/A'}) {status_emoji} {status_text}"
+            
+            with st.expander(expander_title):
                 if is_super_admin:
                     col_details, col_actions = st.columns([3,1])
                     with col_details:
                         st.markdown(f"**Normal Range:** {test['normal_range'] or 'N/A'} | **Units:** {test['units'] or 'N/A'}")
                         st.markdown(f"**Description:** {test['description'] or 'N/A'}")
                         st.markdown(f"**Preparation Required:** {test['preparation_required'] or 'None'}")
-                        st.caption(f"Created by User ID: {test['created_by'] or 'N/A'} | Internal ID: {test['id']}") # Corrected test_id to test['id']
+                        st.caption(f"Created by User ID: {test['created_by'] or 'N/A'} | Internal ID: {test['id']}")
 
                     with col_actions:
                         st.markdown("<br>", unsafe_allow_html=True)
@@ -2734,10 +2828,10 @@ def _display_lab_tests_view(is_super_admin):
                                 del st.session_state.action_lab_test_id
                             st.rerun()
 
-                        action_button_text = "⚠️ Deactivate" if test['is_active'] else "✅ Restore" # Corrected is_active to test['is_active']
+                        action_button_text = "⚠️ Deactivate" if test['is_active'] else "✅ Restore"
                         if st.button(action_button_text, key=f"action_lt_{test['id']}", use_container_width=True):
                             st.session_state.action_lab_test_id = test['id']
-                            st.session_state.action_lab_test_current_status = test['is_active'] # Corrected is_active
+                            st.session_state.action_lab_test_current_status = test['is_active']
                             if 'edit_lab_test_id' in st.session_state:
                                 del st.session_state.edit_lab_test_id
                             st.rerun()
@@ -2745,9 +2839,45 @@ def _display_lab_tests_view(is_super_admin):
                     st.markdown(f"**Normal Range:** {test['normal_range'] or 'N/A'} | **Units:** {test['units'] or 'N/A'}")
                     st.markdown(f"**Description:** {test['description'] or 'N/A'}")
                     st.markdown(f"**Preparation Required:** {test['preparation_required'] or 'None'}")
-                    st.caption(f"Created by User ID: {test['created_by'] or 'N/A'} | Internal ID: {test['id']}") # Corrected test_id
-        if not lab_tests_df.empty: st.markdown("---")
-    else: st.info("No lab tests found matching your criteria.")
+                    st.caption(f"Created by User ID: {test['created_by'] or 'N/A'} | Internal ID: {test['id']}")
+        
+        # Pagination controls at bottom
+        st.markdown("---")
+        
+        # Main pagination controls
+        col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+        
+        with col1:
+            if st.button("⬅️ Previous", disabled=(st.session_state.lab_test_page <= 1), key="lt_prev"):
+                st.session_state.lab_test_page -= 1
+                st.rerun()
+        
+        with col2:
+            if st.button("Next ➡️", disabled=(st.session_state.lab_test_page >= total_pages), key="lt_next"):
+                st.session_state.lab_test_page += 1
+                st.rerun()
+        
+        with col3:
+            st.markdown(f"<div style='text-align: center; font-weight: bold;'>Page {st.session_state.lab_test_page} of {total_pages}</div>", unsafe_allow_html=True)
+        
+        with col4:
+            # Jump to page
+            target_page = st.number_input("Go to page:", min_value=1, max_value=total_pages, 
+                                        value=st.session_state.lab_test_page, key="lt_page_jump")
+        
+        with col5:
+            if st.button("Go", key="lt_go_page"):
+                st.session_state.lab_test_page = target_page
+                st.rerun()
+        
+    else: 
+        st.info("No lab tests found matching your criteria.")
+
+    # Handle edit and action forms (same as before but with unique keys)
+    if hasattr(st.session_state, 'edit_lab_test_id') and st.session_state.edit_lab_test_id is not None:
+        _display_edit_lab_test_form(st.session_state.edit_lab_test_id)
+    elif hasattr(st.session_state, 'action_lab_test_id') and st.session_state.action_lab_test_id is not None:
+        _confirm_and_action_lab_test(st.session_state.action_lab_test_id, st.session_state.get('action_lab_test_current_status', False))
 
 def _display_add_lab_test_form():
     st.subheader("Add New Lab Test Record")
