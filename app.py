@@ -13,6 +13,10 @@ import io
 import requests
 import time
 import re
+import uuid
+from urllib.parse import urlencode
+import os
+import tempfile
 
 # Page configuration
 st.set_page_config(
@@ -109,7 +113,233 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+# Add these helper functions for file-based session management
+def get_session_file_path():
+    """Get the path for session file"""
+    temp_dir = tempfile.gettempdir()
+    return os.path.join(temp_dir, "medscript_session.json")
 
+def save_session_to_file(session_token, user_data):
+    """Save session to temporary file"""
+    try:
+        session_data = {
+            'token': session_token,
+            'user': user_data,
+            'timestamp': time.time()
+        }
+        session_file = get_session_file_path()
+        with open(session_file, 'w') as f:
+            json.dump(session_data, f)
+    except:
+        pass  # If file operations fail, continue without persistence
+
+def load_session_from_file():
+    """Load session from temporary file"""
+    try:
+        session_file = get_session_file_path()
+        if os.path.exists(session_file):
+            with open(session_file, 'r') as f:
+                session_data = json.load(f)
+            
+            # Check if session is less than 1 hour old
+            if time.time() - session_data.get('timestamp', 0) < 3600:
+                return session_data.get('token'), session_data.get('user')
+    except:
+        pass
+    return None, None
+
+def clear_session_file():
+    """Clear session file"""
+    try:
+        session_file = get_session_file_path()
+        if os.path.exists(session_file):
+            os.remove(session_file)
+    except:
+        pass
+    
+# Add this new class after the imports and before DatabaseManager
+class SessionManager:
+    def __init__(self, db_manager):
+        self.db = db_manager
+        
+    def create_session_token(self, user_id):
+        """Create a secure session token"""
+        # Create a unique session token
+        timestamp = str(int(time.time()))
+        random_str = str(uuid.uuid4())
+        session_data = f"{user_id}:{timestamp}:{random_str}"
+        session_token = hashlib.sha256(session_data.encode()).hexdigest()
+        
+        # Store session in database
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        
+        # Clean up old sessions (older than 24 hours)
+        cursor.execute("""
+            DELETE FROM user_sessions 
+            WHERE created_at < datetime('now', '-24 hours')
+        """)
+        
+        # Insert new session
+        cursor.execute("""
+            INSERT OR REPLACE INTO user_sessions (session_token, user_id, created_at, last_activity)
+            VALUES (?, ?, datetime('now'), datetime('now'))
+        """, (session_token, user_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return session_token
+    
+    def validate_session_token(self, session_token):
+        """Validate session token and return user data"""
+        if not session_token:
+            return None
+            
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        
+        # Check if session exists and is valid (within 1 hour of last activity)
+        cursor.execute("""
+            SELECT u.id, u.username, u.full_name, u.user_type, u.medical_license, u.specialization
+            FROM user_sessions s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.session_token = ? 
+                AND s.last_activity > datetime('now', '-1 hour')
+                AND u.is_active = 1
+        """, (session_token,))
+        
+        user = cursor.fetchone()
+        
+        if user:
+            # Update last activity
+            cursor.execute("""
+                UPDATE user_sessions 
+                SET last_activity = datetime('now')
+                WHERE session_token = ?
+            """, (session_token,))
+            conn.commit()
+            
+            user_data = {
+                'id': user[0],
+                'username': user[1],
+                'full_name': user[2],
+                'user_type': user[3],
+                'medical_license': user[4],
+                'specialization': user[5]
+            }
+            
+            conn.close()
+            return user_data
+        
+        conn.close()
+        return None
+    
+    def delete_session(self, session_token):
+        """Delete a session token"""
+        if not session_token:
+            return
+            
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM user_sessions WHERE session_token = ?", (session_token,))
+        conn.commit()
+        conn.close()
+# ------
+# Add this function to create the sessions table
+def create_sessions_table(db_manager):
+    """Create the user_sessions table for session management"""
+    conn = db_manager.get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_token TEXT UNIQUE NOT NULL,
+            user_id INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_activity DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+    """)
+    
+    # Create index for faster lookups
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_sessions_token ON user_sessions (session_token)
+    """)
+    
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_sessions_activity ON user_sessions (last_activity)
+    """)
+    
+    conn.commit()
+    conn.close()
+    
+#------- Session state management
+def init_session_state():
+    """Initialize session state with file-based persistence"""
+    # Initialize session state keys if they don't exist
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    if 'user' not in st.session_state:
+        st.session_state.user = None
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = 'dashboard'
+    if 'session_token' not in st.session_state:
+        st.session_state.session_token = None
+    
+    # Try to restore session from file
+    if not st.session_state.authenticated:
+        try:
+            session_token, user_data = load_session_from_file()
+            if session_token and user_data:
+                # Validate session token with database
+                validated_user = session_manager.validate_session_token(session_token)
+                if validated_user:
+                    st.session_state.authenticated = True
+                    st.session_state.user = validated_user
+                    st.session_state.session_token = session_token
+                else:
+                    # Session invalid, clear file
+                    clear_session_file()
+        except Exception as e:
+            # If there's an error with session validation, clear everything
+            clear_session_file()
+            st.session_state.authenticated = False
+            st.session_state.user = None
+            st.session_state.session_token = None
+
+def update_url_with_session():
+    """Update URL with session token"""
+    if st.session_state.get('session_token'):
+        st.query_params["session"] = st.session_state.session_token
+
+def check_session_timeout():
+    """Check if session has timed out"""
+    if not st.session_state.authenticated:
+        return False
+    
+    if st.session_state.last_activity is None:
+        return False
+    
+    # Check if session has been inactive for more than 60 minutes
+    current_time = datetime.datetime.now()
+    time_diff = current_time - st.session_state.last_activity
+    
+    if time_diff.total_seconds() > 3600:  # 60 minutes in seconds
+        # Session timed out
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.session_state.authenticated = False
+        st.session_state.session_timeout = True
+        return True
+    
+    return False
+
+def update_last_activity():
+    """Update last activity timestamp"""
+    if st.session_state.authenticated:
+        st.session_state.last_activity = datetime.datetime.now()
 # Database setup and management
 class DatabaseManager:
     def __init__(self):
@@ -400,10 +630,34 @@ class AuthManager:
                 'specialization': user[5]
             }
         return None
-    
+    #----
     def logout(self):
+    # Delete session token from database
+        if st.session_state.get('session_token'):
+            try:
+                session_manager.delete_session(st.session_state.session_token)
+            except Exception as e:
+                print(f"Error deleting session: {e}")
+        
+        # Log the logout activity before clearing session
+        if st.session_state.get('user') and st.session_state.get('authenticated'):
+            try:
+                log_activity(st.session_state.user['id'], 'logout')
+            except Exception as e:
+                print(f"Error logging logout: {e}")
+        
+        # Clear session file
+        clear_session_file()
+        
+        # Clear all session state
         for key in list(st.session_state.keys()):
             del st.session_state[key]
+        
+        # Reinitialize basic session state
+        st.session_state.authenticated = False
+        st.session_state.user = None
+        st.session_state.session_token = None
+
 
 # AI Integration for drug interactions
 class AIAnalyzer:
@@ -643,11 +897,17 @@ class PDFGenerator:
 def get_managers():
     db_manager = DatabaseManager()
     auth_manager = AuthManager(db_manager)
+    session_manager = SessionManager(db_manager)
     ai_analyzer = AIAnalyzer()
     pdf_generator = PDFGenerator()
-    return db_manager, auth_manager, ai_analyzer, pdf_generator
+    
+    # Create sessions table - now pass db_manager as parameter
+    create_sessions_table(db_manager)
+    
+    return db_manager, auth_manager, session_manager, ai_analyzer, pdf_generator
 
-db_manager, auth_manager, ai_analyzer, pdf_generator = get_managers()
+# The managers initialization remains the same
+db_manager, auth_manager, session_manager, ai_analyzer, pdf_generator = get_managers()
 
 # Helper functions
 def log_activity(user_id, action_type, entity_type=None, entity_id=None, metadata=None):
@@ -794,10 +1054,27 @@ def show_login():
             if login_button:
                 user = auth_manager.authenticate_user(username, password)
                 if user:
-                    st.session_state.user = user
-                    st.session_state.authenticated = True
-                    log_activity(user['id'], 'login')
-                    st.rerun()
+                    try:
+                        # Create session token
+                        session_token = session_manager.create_session_token(user['id'])
+                        
+                        # Set session state
+                        st.session_state.user = user
+                        st.session_state.authenticated = True
+                        st.session_state.session_token = session_token
+                        
+                        # Save session to file for persistence across refreshes
+                        save_session_to_file(session_token, user)
+                        
+                        # Log activity
+                        log_activity(user['id'], 'login', metadata={
+                            'session_token': session_token[:8] + '...',
+                            'timestamp': datetime.datetime.now().isoformat()
+                        })
+                        
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Login failed: {str(e)}")
                 else:
                     st.error("Invalid username or password")
         
@@ -812,6 +1089,10 @@ def show_sidebar():
     with st.sidebar:
         st.markdown(f"### Welcome, {st.session_state.user['full_name']}")
         st.markdown(f"**Role:** {st.session_state.user['user_type'].replace('_', ' ').title()}")
+        
+        # Show session status
+        if st.session_state.session_token:
+            st.success("🔒 Session Active")
         
         st.markdown("---")
         
@@ -846,9 +1127,6 @@ def show_sidebar():
                 "My Analytics": "analytics"
             }
         
-        # selected_page = st.radio("Navigation", list(pages.keys()))
-        # st.session_state.current_page = pages[selected_page]
-        #-----
         # Find the current page index for the radio button
         current_page_key = st.session_state.current_page
         current_page_name = None
@@ -874,11 +1152,12 @@ def show_sidebar():
             # Clear selected patient when navigating away from prescription page
             if st.session_state.current_page != 'create_prescription' and 'selected_patient' in st.session_state:
                 del st.session_state.selected_patient
+            # Update URL to maintain session
+            update_url_with_session()
             st.rerun()
         
         st.markdown("---")
         if st.button("Logout", use_container_width=True):
-            log_activity(st.session_state.user['id'], 'logout')
             auth_manager.logout()
             st.rerun()
 
@@ -3018,24 +3297,21 @@ def confirm_and_delete_user(user_id_to_action, is_active_status):
 
 # Main application logic
 def main():
-    # Initialize session state
-    if 'authenticated' not in st.session_state:
-        st.session_state.authenticated = False
-    if 'current_page' not in st.session_state:
-        st.session_state.current_page = 'dashboard'
-    
-    # Authentication check
-    if not st.session_state.authenticated:
-        show_login()
-        return
-    
-    # Show sidebar navigation
-    show_sidebar()
-    
-    # Route to appropriate page based on user selection
-    page = st.session_state.current_page
-    
     try:
+        # Initialize session state first
+        init_session_state()
+        
+        # Authentication check
+        if not st.session_state.authenticated:
+            show_login()
+            return
+        
+        # Show sidebar navigation
+        show_sidebar()
+        
+        # Route to appropriate page based on user selection
+        page = st.session_state.current_page
+        
         if page == 'dashboard':
             show_dashboard()
         elif page == 'users':
@@ -3046,10 +3322,8 @@ def main():
             show_todays_patients()
         elif page == 'create_prescription':
             show_create_prescription()
-        elif page == 'medications': # Placeholder for now
+        elif page == 'medications':
             show_medication_database()
-            # st.markdown('<div class="main-header"><h1>💊 Medication Database</h1></div>', unsafe_allow_html=True)
-            # st.info("Medication database management will be implemented here.")
         elif page == 'lab_tests':
             show_lab_tests_database()
         elif page == 'visit_registration':
@@ -3060,9 +3334,15 @@ def main():
             show_analytics()
         else:
             st.error("Page not found")
+            
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
         st.info("Please try refreshing the page or contact support if the problem persists.")
+        
+        # If there's a critical error, reset session
+        clear_session_file()
+        st.session_state.authenticated = False
+        st.session_state.user = None
 
 # --- Medication Database Management START ---
 def _display_medications_view(is_super_admin):
