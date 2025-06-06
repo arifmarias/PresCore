@@ -729,7 +729,7 @@ class AIAnalyzer:
         
         conn.close()
         return enhanced_meds
-
+    # ----
     def analyze_drug_interactions(self, medications, patient_info):
         if not self.client_available or not self.groq_client:
             print("Groq client not available, using fallback")  # Debug log
@@ -747,81 +747,123 @@ class AIAnalyzer:
             
             for med in enhanced_medications:
                 med_detail = f"""
-- **{med['name']}** ({med['generic_name']})
-  - Drug Class: {med['drug_class']}
-  - Dosage: {med['dosage']}, {med['frequency']}, Duration: {med['duration']}
-  - Known Interactions: {med['known_interactions']}
-  - Contraindications: {med['contraindications']}
-  - Indications: {med['indications']}"""
+    - **{med['name']}** ({med['generic_name']})
+    - Drug Class: {med['drug_class']}
+    - Dosage: {med['dosage']}, {med['frequency']}, Duration: {med['duration']}
+    - Known Interactions: {med['known_interactions']}
+    - Contraindications: {med['contraindications']}
+    - Indications: {med['indications']}"""
                 medication_details.append(med_detail)
                 
                 if med['drug_class'] != "Unknown":
                     drug_classes.append(med['drug_class'])
             
-            # Simplified prompt for Llama model
+            # Enhanced prompt with more patient context
             prompt = f"""You are a clinical pharmacist AI. Analyze this prescription for drug interactions and safety.
 
-PATIENT: Age {patient_info.get('age', 'Unknown')}, {patient_info.get('gender', 'Unknown')}
-ALLERGIES: {patient_info.get('allergies', 'None')}
-CONDITIONS: {patient_info.get('medical_conditions', 'None')}
+    PATIENT INFORMATION:
+    - Age: {patient_info.get('age', 'Unknown')}
+    - Gender: {patient_info.get('gender', 'Unknown')}
+    - Allergies: {patient_info.get('allergies', 'None')}
+    - Medical Conditions: {patient_info.get('medical_conditions', 'None')}
+    - Current Diagnosis: {patient_info.get('diagnosis', 'Not specified')}
+    - Current Problems: {patient_info.get('current_problems', 'Not specified')}
+    - Vital Signs: {patient_info.get('vital_signs', 'Not recorded')}
+    - Clinical Notes: {patient_info.get('general_notes', 'None')}
 
-MEDICATIONS:
-{chr(10).join(medication_details)}
+    MEDICATIONS:
+    {chr(10).join(medication_details)}
 
-DRUG CLASSES: {', '.join(set(drug_classes)) if drug_classes else 'Various'}
+    DRUG CLASSES: {', '.join(set(drug_classes)) if drug_classes else 'Various'}
 
-Provide analysis in this exact JSON format:
-{{
-    "interactions": [
-        {{
-            "drugs": ["drug1", "drug2"],
-            "drug_classes": ["class1", "class2"],
-            "severity": "major|moderate|minor",
-            "description": "interaction description",
-            "recommendation": "clinical recommendation"
-        }}
-    ],
-    "allergies": [
-        {{
-            "drug": "drug_name",
-            "allergy": "allergy_type",
-            "risk": "risk description"
-        }}
-    ],
-    "contraindications": [
-        {{
-            "drug": "drug_name",
-            "condition": "medical_condition",
-            "risk": "risk description"
-        }}
-    ],
-    "monitoring": [
-        {{
-            "parameter": "what_to_monitor",
-            "frequency": "how_often",
-            "reason": "why monitor"
-        }}
-    ],
-    "drug_class_analysis": [
-        {{
-            "drug_class": "class_name",
-            "medications_in_class": ["med1", "med2"],
-            "interaction_potential": "high|moderate|low",
-            "clinical_notes": "important notes"
-        }}
-    ],
-    "overall_risk": "low|moderate|high",
-    "summary": "Brief clinical summary"
-}}
+    Analyze for:
+    1. Drug-drug interactions considering the patient's diagnosis and conditions
+    2. Contraindications based on medical conditions and vital signs
+    3. Dosing considerations for age and medical conditions
+    4. Allergy cross-reactivity risks
+    5. Monitoring requirements based on conditions and medications
 
-Respond with valid JSON only. No additional text."""
+    Provide analysis in this exact JSON format:
+    {{
+        "interactions": [
+            {{
+                "drugs": ["drug1", "drug2"],
+                "drug_classes": ["class1", "class2"],
+                "severity": "major|moderate|minor",
+                "description": "interaction description",
+                "recommendation": "clinical recommendation",
+                "clinical_relevance": "relevance to patient's condition"
+            }}
+        ],
+        "allergies": [
+            {{
+                "drug": "drug_name",
+                "allergy": "allergy_type",
+                "risk": "risk description",
+                "cross_reactivity": "potential cross-reactive substances"
+            }}
+        ],
+        "contraindications": [
+            {{
+                "drug": "drug_name",
+                "condition": "medical_condition",
+                "risk": "risk description",
+                "severity": "absolute|relative",
+                "alternative": "suggested alternative"
+            }}
+        ],
+        "condition_specific_concerns": [
+            {{
+                "condition": "patient_condition",
+                "medications_affected": ["med1", "med2"],
+                "concern": "specific concern",
+                "recommendation": "clinical action needed"
+            }}
+        ],
+        "vital_signs_considerations": [
+            {{
+                "parameter": "vital_sign",
+                "medications_affected": ["med1", "med2"],
+                "concern": "monitoring concern",
+                "target_range": "recommended range"
+            }}
+        ],
+        "monitoring": [
+            {{
+                "parameter": "what_to_monitor",
+                "frequency": "how_often",
+                "reason": "why monitor",
+                "baseline_value": "current vital sign if relevant"
+            }}
+        ],
+        "drug_class_analysis": [
+            {{
+                "drug_class": "class_name",
+                "medications_in_class": ["med1", "med2"],
+                "interaction_potential": "high|moderate|low",
+                "clinical_notes": "condition-specific notes"
+            }}
+        ],
+        "age_specific_considerations": [
+            {{
+                "age_group": "pediatric|adult|geriatric",
+                "medications_affected": ["med1", "med2"],
+                "consideration": "age-related concern",
+                "adjustment": "recommended adjustment"
+            }}
+        ],
+        "overall_risk": "low|moderate|high",
+        "summary": "Brief clinical summary considering all patient factors"
+    }}
+
+    Respond with valid JSON only. No additional text."""
             
             # Call Groq API using the client
             chat_completion = self.groq_client.chat.completions.create(
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a clinical pharmacist expert. Provide evidence-based drug interaction analysis in valid JSON format only. Do not include any text outside the JSON response."
+                        "content": "You are a clinical pharmacist expert specializing in drug interactions and patient safety. Provide evidence-based analysis considering all patient factors including diagnosis, vital signs, and clinical context. Respond only with valid JSON."
                     },
                     {
                         "role": "user", 
@@ -862,7 +904,11 @@ Respond with valid JSON only. No additional text."""
                         'api_provider': 'groq',
                         'analysis_timestamp': datetime.datetime.now().isoformat(),
                         'medications_analyzed': len(enhanced_medications),
-                        'drug_classes_identified': len(set(drug_classes))
+                        'drug_classes_identified': len(set(drug_classes)),
+                        'patient_factors_considered': [
+                            'age', 'gender', 'allergies', 'medical_conditions', 
+                            'diagnosis', 'vital_signs', 'current_problems'
+                        ]
                     }
                     
                     print("Successfully parsed Groq response")  # Debug log
@@ -1166,9 +1212,12 @@ def display_ai_analysis(analysis_result):
             with col1:
                 st.write(f"**Model Used:** {metadata.get('model_used', 'Fallback Analysis')}")
                 st.write(f"**Medications Analyzed:** {metadata.get('medications_analyzed', 'N/A')}")
-            with col2:
                 st.write(f"**Drug Classes Identified:** {metadata.get('drug_classes_identified', 'N/A')}")
+            with col2:
                 st.write(f"**Analysis Type:** {metadata.get('analysis_type', 'AI-powered')}")
+                patient_factors = metadata.get('patient_factors_considered', [])
+                if patient_factors:
+                    st.write(f"**Patient Factors Considered:** {', '.join(patient_factors)}")
 
     # Overall Risk and Summary
     overall_risk = analysis_result.get('overall_risk', 'N/A').capitalize()
@@ -1181,7 +1230,58 @@ def display_ai_analysis(analysis_result):
     st.markdown(f"**Summary:** {summary}")
     st.markdown("---")
 
-    # Drug Class Analysis (New Section)
+    # Condition-Specific Concerns (NEW SECTION)
+    condition_concerns = analysis_result.get('condition_specific_concerns', [])
+    if condition_concerns:
+        st.markdown("#### 🏥 Condition-Specific Medication Concerns:")
+        for concern in condition_concerns:
+            condition = concern.get('condition', 'Unknown condition')
+            meds_affected = concern.get('medications_affected', [])
+            concern_text = concern.get('concern', 'No specific concern noted')
+            recommendation = concern.get('recommendation', 'Monitor closely')
+            
+            with st.expander(f"⚠️ {condition} - {len(meds_affected)} medication(s) affected"):
+                st.markdown(f"- **Condition:** {condition}")
+                st.markdown(f"- **Medications Affected:** {', '.join(meds_affected)}")
+                st.markdown(f"- **Concern:** {concern_text}")
+                st.markdown(f"- **Recommendation:** {recommendation}")
+        st.markdown("---")
+
+    # Vital Signs Considerations (NEW SECTION)
+    vital_considerations = analysis_result.get('vital_signs_considerations', [])
+    if vital_considerations:
+        st.markdown("#### 📊 Vital Signs Monitoring Considerations:")
+        for vital in vital_considerations:
+            parameter = vital.get('parameter', 'Unknown parameter')
+            meds_affected = vital.get('medications_affected', [])
+            concern = vital.get('concern', 'Standard monitoring')
+            target_range = vital.get('target_range', 'As per guidelines')
+            
+            with st.expander(f"📈 {parameter} Monitoring"):
+                st.markdown(f"- **Parameter:** {parameter}")
+                st.markdown(f"- **Medications Affected:** {', '.join(meds_affected)}")
+                st.markdown(f"- **Monitoring Concern:** {concern}")
+                st.markdown(f"- **Target Range:** {target_range}")
+        st.markdown("---")
+
+    # Age-Specific Considerations (NEW SECTION)
+    age_considerations = analysis_result.get('age_specific_considerations', [])
+    if age_considerations:
+        st.markdown("#### 👥 Age-Specific Medication Considerations:")
+        for age_concern in age_considerations:
+            age_group = age_concern.get('age_group', 'Unknown')
+            meds_affected = age_concern.get('medications_affected', [])
+            consideration = age_concern.get('consideration', 'Standard dosing')
+            adjustment = age_concern.get('adjustment', 'No adjustment needed')
+            
+            with st.expander(f"👶👨👴 {age_group.title()} Considerations"):
+                st.markdown(f"- **Age Group:** {age_group.title()}")
+                st.markdown(f"- **Medications Affected:** {', '.join(meds_affected)}")
+                st.markdown(f"- **Consideration:** {consideration}")
+                st.markdown(f"- **Recommended Adjustment:** {adjustment}")
+        st.markdown("---")
+
+    # Drug Class Analysis
     drug_class_analysis = analysis_result.get('drug_class_analysis', [])
     if drug_class_analysis:
         st.markdown("#### 🧬 Drug Class Analysis:")
@@ -1224,6 +1324,7 @@ def display_ai_analysis(analysis_result):
             mechanism = item.get('mechanism', 'Not specified')
             clinical_effect = item.get('clinical_effect', 'Not specified')
             monitoring = item.get('monitoring', 'Standard monitoring')
+            clinical_relevance = item.get('clinical_relevance', 'General interaction')
 
             severity_color = {"Major": "red", "Moderate": "orange", "Minor": "green"}.get(severity, "gray")
             
@@ -1240,12 +1341,14 @@ def display_ai_analysis(analysis_result):
                     st.markdown(f"- **Mechanism:** {mechanism}")
                 if clinical_effect != 'Not specified':
                     st.markdown(f"- **Clinical Effect:** {clinical_effect}")
+                if clinical_relevance != 'General interaction':
+                    st.markdown(f"- **Clinical Relevance:** {clinical_relevance}")
                 st.markdown(f"- **Recommendation:** {recommendation}")
                 if monitoring != 'Standard monitoring':
                     st.markdown(f"- **Monitoring:** {monitoring}")
         st.markdown("---")
 
-    # Allergies (Enhanced)
+    # Enhanced Allergies
     allergies = analysis_result.get('allergies', [])
     if allergies:
         st.markdown("#### ⚠️ Allergy Concerns:")
@@ -1260,7 +1363,7 @@ def display_ai_analysis(analysis_result):
                 st.markdown(f"- **Patient Allergy:** {allergy_type}")
                 st.markdown(f"- **Risk Assessment:** {risk}")
                 if cross_reactivity != 'None identified':
-                    st.markdown(f"- **Cross-Reactivity:** {cross_reactivity}")
+                    st.markdown(f"- **Cross-Reactivity Risk:** {cross_reactivity}")
         st.markdown("---")
 
     # Enhanced Contraindications
@@ -1312,12 +1415,15 @@ def display_ai_analysis(analysis_result):
             frequency = item.get('frequency', 'N/A')
             target_range = item.get('target_range', 'As per guidelines')
             reason = item.get('reason', 'N/A')
+            baseline_value = item.get('baseline_value', 'Not available')
             
             with st.expander(f"📊 Monitor: {parameter} ({frequency})"):
                 st.markdown(f"- **Parameter:** {parameter}")
                 st.markdown(f"- **Frequency:** {frequency}")
                 st.markdown(f"- **Target Range:** {target_range}")
                 st.markdown(f"- **Reason:** {reason}")
+                if baseline_value != 'Not available':
+                    st.markdown(f"- **Current/Baseline Value:** {baseline_value}")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -2382,11 +2488,15 @@ def show_create_prescription():
                     })
 
                 ai_patient_info = {
-                    'age': patient_info.get('age', 'Unknown'),
-                    'gender': patient_info.get('gender', 'Unknown'),
-                    'allergies': patient_info.get('allergies', 'None known'),
-                    'medical_conditions': patient_info.get('medical_conditions', 'None')
-                }
+                        'age': patient_info.get('age', 'Unknown'),
+                        'gender': patient_info.get('gender', 'Unknown'),
+                        'allergies': patient_info.get('allergies', 'None known'),
+                        'medical_conditions': patient_info.get('medical_conditions', 'None'),
+                        'diagnosis': diagnosis if diagnosis.strip() else 'Not specified',  # ADD THIS
+                        'general_notes': general_notes if general_notes.strip() else 'None',  # ADD THIS
+                        'current_problems': patient_info.get('current_problems', 'Not specified'),  # ADD THIS
+                        'vital_signs': patient_info.get('vital_signs', 'Not recorded')  # ADD THIS
+                    }
                 st.session_state.ai_analysis_result = ai_analyzer.analyze_drug_interactions(meds_for_ai, ai_patient_info)
                 
     if 'ai_analysis_result' in st.session_state and st.session_state.ai_analysis_result:
