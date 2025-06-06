@@ -314,13 +314,13 @@ def update_url_with_session():
     if st.session_state.get('session_token'):
         st.query_params["session"] = st.session_state.session_token
 
-def check_session_timeout():
-    """Check if session has timed out"""
-    if not st.session_state.authenticated:
-        return False
+# def check_session_timeout():
+#     """Check if session has timed out"""
+#     if not st.session_state.authenticated:
+#         return False
     
-    if st.session_state.last_activity is None:
-        return False
+#     if st.session_state.last_activity is None:
+#         return False
     
     # Check if session has been inactive for more than 60 minutes
     current_time = datetime.datetime.now()
@@ -336,10 +336,10 @@ def check_session_timeout():
     
     return False
 
-def update_last_activity():
-    """Update last activity timestamp"""
-    if st.session_state.authenticated:
-        st.session_state.last_activity = datetime.datetime.now()
+# def update_last_activity():
+#     """Update last activity timestamp"""
+#     if st.session_state.authenticated:
+#         st.session_state.last_activity = datetime.datetime.now()
 # Database setup and management
 class DatabaseManager:
     def __init__(self):
@@ -1152,8 +1152,7 @@ def show_sidebar():
             # Clear selected patient when navigating away from prescription page
             if st.session_state.current_page != 'create_prescription' and 'selected_patient' in st.session_state:
                 del st.session_state.selected_patient
-            # Update URL to maintain session
-            update_url_with_session()
+            # REMOVED: update_url_with_session() call - this was causing the error
             st.rerun()
         
         st.markdown("---")
