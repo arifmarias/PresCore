@@ -2328,7 +2328,175 @@ def show_todays_patients():
         st.info("No patients scheduled for today")
     
     conn.close()
+def show_recent_prescriptions_summary(patient_db_id):
+    """Show recent prescriptions with medications and diagnosis"""
+    conn = db_manager.get_connection()
+    
+    recent_prescriptions = pd.read_sql("""
+        SELECT p.prescription_id, p.diagnosis, p.notes, p.created_at,
+               u.full_name as doctor_name, p.ai_interaction_analysis
+        FROM prescriptions p
+        JOIN users u ON p.doctor_id = u.id
+        WHERE p.patient_id = ?
+        ORDER BY p.created_at DESC
+        LIMIT 5
+    """, conn, params=[patient_db_id])
+    
+    if not recent_prescriptions.empty:
+        for _, rx in recent_prescriptions.iterrows():
+            with st.expander(f"🗓️ {rx['prescription_id']} - {rx['created_at'][:10]} (Dr. {rx['doctor_name']})"):
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.markdown(f"**Diagnosis:** {rx['diagnosis']}")
+                    if rx['notes']:
+                        st.markdown(f"**Notes:** {rx['notes']}")
+                    
+                    # Get medications for this prescription
+                    medications = pd.read_sql("""
+                        SELECT m.name, pi.dosage, pi.frequency, pi.duration, pi.instructions
+                        FROM prescription_items pi
+                        JOIN medications m ON pi.medication_id = m.id
+                        JOIN prescriptions p ON pi.prescription_id = p.id
+                        WHERE p.prescription_id = ?
+                    """, conn, params=[rx['prescription_id']])
+                    
+                    if not medications.empty:
+                        st.markdown("**Medications:**")
+                        for _, med in medications.iterrows():
+                            st.markdown(f"• {med['name']} - {med['dosage']}, {med['frequency']}, {med['duration']}")
+                            if med['instructions']:
+                                st.caption(f"  Instructions: {med['instructions']}")
+                    
+                    # Get lab tests for this prescription
+                    lab_tests = pd.read_sql("""
+                        SELECT lt.test_name, plt.urgency, plt.instructions
+                        FROM prescription_lab_tests plt
+                        JOIN lab_tests lt ON plt.lab_test_id = lt.id
+                        JOIN prescriptions p ON plt.prescription_id = p.id
+                        WHERE p.prescription_id = ?
+                    """, conn, params=[rx['prescription_id']])
+                    
+                    if not lab_tests.empty:
+                        st.markdown("**Lab Tests:**")
+                        for _, test in lab_tests.iterrows():
+                            st.markdown(f"• {test['test_name']} ({test['urgency']})")
+                
+                with col2:
+                    # Show AI analysis if available
+                    if rx['ai_interaction_analysis']:
+                        if st.button(f"View AI Analysis", key=f"ai_analysis_{rx['prescription_id']}"):
+                            try:
+                                ai_data = json.loads(rx['ai_interaction_analysis'])
+                                st.json(ai_data)
+                            except:
+                                st.text(rx['ai_interaction_analysis'])
+    else:
+        st.info("No previous prescriptions found for this patient")
+    
+    conn.close()
 
+def show_patient_medical_summary(patient_db_id):
+    """Show comprehensive medical summary"""
+    conn = db_manager.get_connection()
+    
+    # Get patient details
+    patient = pd.read_sql("""
+        SELECT first_name, last_name, date_of_birth, gender, allergies, 
+               medical_conditions, emergency_contact, insurance_info
+        FROM patients WHERE id = ?
+    """, conn, params=[patient_db_id])
+    
+    if not patient.empty:
+        p = patient.iloc[0]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 👤 Patient Information")
+            age = calculate_age(p['date_of_birth'])
+            st.markdown(f"**Age:** {age} years")
+            st.markdown(f"**Gender:** {p['gender']}")
+            
+            if p['allergies']:
+                st.markdown(f"⚠️ **Allergies:** {p['allergies']}")
+            else:
+                st.markdown("**Allergies:** None known")
+            
+            if p['medical_conditions']:
+                st.markdown(f"🏥 **Medical Conditions:** {p['medical_conditions']}")
+            else:
+                st.markdown("**Medical Conditions:** None recorded")
+        
+        with col2:
+            st.markdown("### 📊 Prescription Statistics")
+            
+            # Get prescription statistics
+            stats = pd.read_sql("""
+                SELECT 
+                    COUNT(*) as total_prescriptions,
+                    COUNT(DISTINCT DATE(created_at)) as visit_days,
+                    MAX(created_at) as last_prescription
+                FROM prescriptions WHERE patient_id = ?
+            """, conn, params=[patient_db_id])
+            
+            if not stats.empty:
+                s = stats.iloc[0]
+                st.metric("Total Prescriptions", s['total_prescriptions'])
+                st.metric("Visit Days", s['visit_days'])
+                if s['last_prescription']:
+                    st.metric("Last Prescription", s['last_prescription'][:10])
+            
+            # Most prescribed medications
+            frequent_meds = pd.read_sql("""
+                SELECT m.name, COUNT(*) as frequency
+                FROM prescription_items pi
+                JOIN medications m ON pi.medication_id = m.id
+                JOIN prescriptions p ON pi.prescription_id = p.id
+                WHERE p.patient_id = ?
+                GROUP BY m.name
+                ORDER BY frequency DESC
+                LIMIT 5
+            """, conn, params=[patient_db_id])
+            
+            if not frequent_meds.empty:
+                st.markdown("**Most Prescribed Medications:**")
+                for _, med in frequent_meds.iterrows():
+                    st.markdown(f"• {med['name']} ({med['frequency']}x)")
+    
+    conn.close()
+
+def show_patient_visit_history(patient_db_id):
+    """Show all visit history with details"""
+    conn = db_manager.get_connection()
+    
+    visits = pd.read_sql("""
+        SELECT v.visit_date, v.visit_type, v.current_problems, v.vital_signs, 
+               v.notes, v.consultation_completed, u.full_name as created_by_name
+        FROM patient_visits v
+        LEFT JOIN users u ON v.created_by = u.id
+        WHERE v.patient_id = ?
+        ORDER BY v.visit_date DESC, v.created_at DESC
+    """, conn, params=[patient_db_id])
+    
+    if not visits.empty:
+        for _, visit in visits.iterrows():
+            status_icon = "✅" if visit['consultation_completed'] else "⏳"
+            
+            with st.expander(f"{status_icon} {visit['visit_date']} - {visit['visit_type']}"):
+                st.markdown(f"**Problems:** {visit['current_problems']}")
+                
+                if visit['vital_signs']:
+                    st.markdown(f"**Vital Signs:** {visit['vital_signs']}")
+                
+                if visit['notes']:
+                    st.markdown(f"**Notes:** {visit['notes']}")
+                
+                st.caption(f"Registered by: {visit['created_by_name'] or 'Unknown'}")
+    else:
+        st.info("No visit history found for this patient")
+    
+    conn.close()
 # Create Prescription (Doctor only)
 def show_create_prescription():
     st.markdown('<div class="main-header"><h1>📝 Create Prescription</h1></div>', unsafe_allow_html=True)
@@ -2394,7 +2562,20 @@ def show_create_prescription():
     if not patient_info:
         st.warning("Please select a patient to proceed.")
         return
-
+    st.markdown("---")
+    st.subheader("📋 Previous Prescriptions & Medical History")
+    
+    # Create tabs for different history views
+    history_tab1, history_tab2, history_tab3 = st.tabs(["Recent Prescriptions", "Medical Summary", "All Visit History"])
+    
+    with history_tab1:
+        show_recent_prescriptions_summary(patient_info['patient_db_id'])
+    
+    with history_tab2:
+        show_patient_medical_summary(patient_info['patient_db_id'])
+    
+    with history_tab3:
+        show_patient_visit_history(patient_info['patient_db_id'])
     # --- Prescription Form Starts Here ---
     st.markdown("---")
     st.subheader("1. Diagnosis and Notes")
@@ -2451,8 +2632,41 @@ def show_create_prescription():
                     st.rerun()
         st.markdown("---")
 
+    # --- AI Analysis Section ---
+    st.subheader("3. AI Drug Interaction Analysis")
+    if st.button("Analyze Drug Interactions", key="analyze_interactions_button"):
+        if not st.session_state.prescription_medications:
+            st.warning("Please add medications to analyze interactions.")
+        else:
+            with st.spinner("Analyzing drug interactions..."):
+                # Prepare medication data for AI
+                meds_for_ai = []
+                for med_item in st.session_state.prescription_medications:
+                    # Find original medication name without strength for better AI processing if needed
+                    # For now, using the name as is from med_item['name'] which might include strength
+                    meds_for_ai.append({
+                        "name": med_item['name'].split(' (')[0], # Attempt to get base name
+                        "dosage": med_item['dosage'],
+                        "frequency": med_item['frequency']
+                    })
+
+                ai_patient_info = {
+                        'age': patient_info.get('age', 'Unknown'),
+                        'gender': patient_info.get('gender', 'Unknown'),
+                        'allergies': patient_info.get('allergies', 'None known'),
+                        'medical_conditions': patient_info.get('medical_conditions', 'None'),
+                        'diagnosis': diagnosis if diagnosis.strip() else 'Not specified',  # ADD THIS
+                        'general_notes': general_notes if general_notes.strip() else 'None',  # ADD THIS
+                        'current_problems': patient_info.get('current_problems', 'Not specified'),  # ADD THIS
+                        'vital_signs': patient_info.get('vital_signs', 'Not recorded')  # ADD THIS
+                    }
+                st.session_state.ai_analysis_result = ai_analyzer.analyze_drug_interactions(meds_for_ai, ai_patient_info)
+                
+    if 'ai_analysis_result' in st.session_state and st.session_state.ai_analysis_result:
+        display_ai_analysis(st.session_state.ai_analysis_result)
+
     # --- Lab Tests Section ---
-    st.subheader("3. Lab Tests")
+    st.subheader("4. Lab Tests")
 
     with st.form(key="add_lab_test_item_form", clear_on_submit=True):
         col_lab_select, col_lab_urgency = st.columns(2)
@@ -2495,40 +2709,7 @@ def show_create_prescription():
                     st.session_state.prescription_lab_tests.pop(i)
                     st.rerun()
         st.markdown("---")
-
-    # --- AI Analysis Section ---
-    st.subheader("4. AI Drug Interaction Analysis")
-    if st.button("Analyze Drug Interactions", key="analyze_interactions_button"):
-        if not st.session_state.prescription_medications:
-            st.warning("Please add medications to analyze interactions.")
-        else:
-            with st.spinner("Analyzing drug interactions..."):
-                # Prepare medication data for AI
-                meds_for_ai = []
-                for med_item in st.session_state.prescription_medications:
-                    # Find original medication name without strength for better AI processing if needed
-                    # For now, using the name as is from med_item['name'] which might include strength
-                    meds_for_ai.append({
-                        "name": med_item['name'].split(' (')[0], # Attempt to get base name
-                        "dosage": med_item['dosage'],
-                        "frequency": med_item['frequency']
-                    })
-
-                ai_patient_info = {
-                        'age': patient_info.get('age', 'Unknown'),
-                        'gender': patient_info.get('gender', 'Unknown'),
-                        'allergies': patient_info.get('allergies', 'None known'),
-                        'medical_conditions': patient_info.get('medical_conditions', 'None'),
-                        'diagnosis': diagnosis if diagnosis.strip() else 'Not specified',  # ADD THIS
-                        'general_notes': general_notes if general_notes.strip() else 'None',  # ADD THIS
-                        'current_problems': patient_info.get('current_problems', 'Not specified'),  # ADD THIS
-                        'vital_signs': patient_info.get('vital_signs', 'Not recorded')  # ADD THIS
-                    }
-                st.session_state.ai_analysis_result = ai_analyzer.analyze_drug_interactions(meds_for_ai, ai_patient_info)
-                
-    if 'ai_analysis_result' in st.session_state and st.session_state.ai_analysis_result:
-        display_ai_analysis(st.session_state.ai_analysis_result)
-
+        
     # --- Finalize and Save Section ---
     st.markdown("---")
     st.subheader("5. Finalize and Save Prescription")
