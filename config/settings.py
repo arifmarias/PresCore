@@ -6,6 +6,8 @@ This file contains all configuration settings, constants, and application parame
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+import pytz
+from datetime import datetime, timezone, timedelta
 
 # Load environment variables from .env file
 load_dotenv()
@@ -321,3 +323,50 @@ FEATURE_FLAGS = {
     'ENABLE_AUDIT_LOG': True,
     'ENABLE_BACKUP': False  # Future feature
 }
+
+# Timezone Configuration
+TIMEZONE_CONFIG = {
+    'APP_TIMEZONE': 'Asia/Dhaka',  # GMT+6
+    'GMT_OFFSET': 6,
+    'TIMEZONE_NAME': 'Bangladesh Standard Time (BST)'
+}
+
+# Create timezone object
+APP_TIMEZONE = pytz.timezone(TIMEZONE_CONFIG['APP_TIMEZONE'])
+GMT_PLUS_6 = timezone(timedelta(hours=6))
+
+# Utility functions for timezone handling
+def get_current_time():
+    """Get current time in GMT+6"""
+    return datetime.now(APP_TIMEZONE)
+
+def get_current_time_str(format_type='timestamp'):
+    """Get current time as string in GMT+6"""
+    current_time = get_current_time()
+    if format_type == 'timestamp':
+        return current_time.strftime(DATE_FORMATS['TIMESTAMP'])
+    elif format_type == 'date':
+        return current_time.strftime(DATE_FORMATS['INPUT'])
+    elif format_type == 'display':
+        return current_time.strftime(DATE_FORMATS['DISPLAY'])
+    return current_time.isoformat()
+
+def convert_utc_to_local(utc_datetime_str):
+    """Convert UTC datetime string to GMT+6"""
+    try:
+        if isinstance(utc_datetime_str, str):
+            utc_dt = datetime.fromisoformat(utc_datetime_str.replace('Z', '+00:00'))
+        else:
+            utc_dt = utc_datetime_str
+        
+        if utc_dt.tzinfo is None:
+            utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+        
+        local_dt = utc_dt.astimezone(APP_TIMEZONE)
+        return local_dt.strftime(DATE_FORMATS['TIMESTAMP'])
+    except:
+        return utc_datetime_str
+
+def get_today_date():
+    """Get today's date in GMT+6"""
+    return get_current_time().date()

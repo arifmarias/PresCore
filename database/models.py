@@ -64,12 +64,12 @@ def create_users_table() -> str:
         specialization TEXT,
         email TEXT,
         phone TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT DEFAULT (datetime('now', '+6 hours')),
+        updated_at TEXT DEFAULT (datetime('now', '+6 hours')),
         is_active BOOLEAN DEFAULT 1,
-        last_login DATETIME,
+        last_login TEXT,
         failed_login_attempts INTEGER DEFAULT 0,
-        locked_until DATETIME
+        locked_until TEXT
     )
     """
 
@@ -91,8 +91,8 @@ def create_patients_table() -> str:
         emergency_contact TEXT,
         emergency_phone TEXT,
         insurance_info TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT DEFAULT (datetime('now', '+6 hours')),
+        updated_at TEXT DEFAULT (datetime('now', '+6 hours')),
         created_by INTEGER,
         is_active BOOLEAN DEFAULT 1,
         notes TEXT,
@@ -125,8 +125,8 @@ def create_patient_visits_table() -> str:
         created_by INTEGER NOT NULL,
         consultation_completed BOOLEAN DEFAULT 0,
         prescription_id INTEGER,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT DEFAULT (datetime('now', '+6 hours')),
+        updated_at TEXT DEFAULT (datetime('now', '+6 hours')),
         FOREIGN KEY (patient_id) REFERENCES patients (id) ON DELETE CASCADE,
         FOREIGN KEY (created_by) REFERENCES users (id),
         FOREIGN KEY (prescription_id) REFERENCES prescriptions (id)
@@ -153,8 +153,8 @@ def create_medications_table() -> str:
         is_controlled BOOLEAN DEFAULT 0,
         is_favorite BOOLEAN DEFAULT 0,
         created_by INTEGER,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT DEFAULT (datetime('now', '+6 hours')),
+        updated_at TEXT DEFAULT (datetime('now', '+6 hours')),
         is_active BOOLEAN DEFAULT 1,
         manufacturer TEXT,
         storage_conditions TEXT,
@@ -179,8 +179,8 @@ def create_lab_tests_table() -> str:
         turnaround_time TEXT,
         cost REAL,
         created_by INTEGER,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT DEFAULT (datetime('now', '+6 hours')),
+        updated_at TEXT DEFAULT (datetime('now', '+6 hours')),
         is_active BOOLEAN DEFAULT 1,
         FOREIGN KEY (created_by) REFERENCES users (id)
     )
@@ -202,8 +202,8 @@ def create_prescriptions_table() -> str:
         ai_interaction_analysis TEXT,
         follow_up_date DATE,
         follow_up_instructions TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT DEFAULT (datetime('now', '+6 hours')),
+        updated_at TEXT DEFAULT (datetime('now', '+6 hours')),
         consultation_fee REAL,
         total_medications INTEGER DEFAULT 0,
         total_lab_tests INTEGER DEFAULT 0,
@@ -212,6 +212,7 @@ def create_prescriptions_table() -> str:
         FOREIGN KEY (visit_id) REFERENCES patient_visits (id)
     )
     """
+
 
 def create_prescription_items_table() -> str:
     """Create prescription items table for individual medications"""
@@ -230,7 +231,7 @@ def create_prescription_items_table() -> str:
         start_date DATE,
         end_date DATE,
         is_substitutable BOOLEAN DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT DEFAULT (datetime('now', '+6 hours')),
         FOREIGN KEY (prescription_id) REFERENCES prescriptions (id) ON DELETE CASCADE,
         FOREIGN KEY (medication_id) REFERENCES medications (id)
     )
@@ -248,7 +249,7 @@ def create_prescription_lab_tests_table() -> str:
         sample_collection_date DATE,
         fasting_required BOOLEAN DEFAULT 0,
         special_instructions TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT DEFAULT (datetime('now', '+6 hours')),
         FOREIGN KEY (prescription_id) REFERENCES prescriptions (id) ON DELETE CASCADE,
         FOREIGN KEY (lab_test_id) REFERENCES lab_tests (id)
     )
@@ -270,8 +271,8 @@ def create_templates_table() -> str:
         instructions_template TEXT,
         is_active BOOLEAN DEFAULT 1,
         usage_count INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT DEFAULT (datetime('now', '+6 hours')),
+        updated_at TEXT DEFAULT (datetime('now', '+6 hours')),
         FOREIGN KEY (doctor_id) REFERENCES users (id) ON DELETE CASCADE
     )
     """
@@ -289,7 +290,7 @@ def create_analytics_table() -> str:
         ip_address TEXT,
         user_agent TEXT,
         session_id TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        timestamp TEXT DEFAULT (datetime('now', '+6 hours')),
         execution_time_ms INTEGER,
         success BOOLEAN DEFAULT 1,
         error_message TEXT,

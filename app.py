@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 import os
 import tempfile
 from groq import Groq
-
+from config.settings import get_current_time, get_current_time_str, convert_utc_to_local, get_today_date, APP_TIMEZONE
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
@@ -1190,18 +1190,34 @@ db_manager, auth_manager, session_manager, ai_analyzer, pdf_generator = get_mana
 
 # Helper functions
 def log_activity(user_id, action_type, entity_type=None, entity_id=None, metadata=None):
-    """Log user activity for analytics"""
+    """Log user activity for analytics with GMT+6 timestamp"""
     conn = db_manager.get_connection()
     cursor = conn.cursor()
     
+    # Use GMT+6 timestamp
+    current_timestamp = get_current_time_str()
+    
     cursor.execute("""
-        INSERT INTO analytics (user_id, action_type, entity_type, entity_id, metadata)
-        VALUES (?, ?, ?, ?, ?)
-    """, (user_id, action_type, entity_type, entity_id, json.dumps(metadata) if metadata else None))
+        INSERT INTO analytics (user_id, action_type, entity_type, entity_id, metadata, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (user_id, action_type, entity_type, entity_id, 
+          json.dumps(metadata) if metadata else None, current_timestamp))
     
     conn.commit()
     conn.close()
 
+def display_local_time(utc_time_str):
+    """Display time in GMT+6 format for users"""
+    if not utc_time_str:
+        return "N/A"
+    
+    try:
+        # Convert UTC string to local time
+        local_time = convert_utc_to_local(utc_time_str)
+        return local_time
+    except:
+        return utc_time_str
+    
 def calculate_age(birth_date):
     """Calculate age from birth date"""
     today = datetime.date.today()
@@ -1209,15 +1225,15 @@ def calculate_age(birth_date):
     return today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
 
 def generate_patient_id():
-    """Generate unique patient ID"""
-    today = datetime.date.today().strftime('%Y%m%d')
+    """Generate unique patient ID with GMT+6 date"""
+    today = get_today_date().strftime('%Y%m%d')
     import random
     random_num = random.randint(100000, 999999)
     return f"PT-{today}-{random_num:06d}"
 
 def generate_prescription_id():
-    """Generate unique prescription ID"""
-    today = datetime.date.today().strftime('%Y%m%d')
+    """Generate unique prescription ID with GMT+6 date"""
+    today = get_today_date().strftime('%Y%m%d')
     import random
     random_num = random.randint(1000, 9999)
     return f"RX-{today}-{random_num:04d}"
@@ -1599,7 +1615,7 @@ def show_dashboard():
         st.metric("Total Prescriptions", prescriptions_count)
     
     with col4:
-        today_visits = pd.read_sql("SELECT COUNT(*) as count FROM patient_visits WHERE visit_date = date('now')", conn).iloc[0]['count']
+        today_visits = pd.read_sql("SELECT COUNT(*) as count FROM patient_visits WHERE visit_date = date('now', '+6 hours')", conn).iloc[0]['count']
         st.metric("Today's Visits", today_visits)
     
     st.markdown("---")
@@ -1631,7 +1647,7 @@ def show_dashboard():
                    v.visit_type, v.current_problems, v.consultation_completed
             FROM patient_visits v
             JOIN patients pt ON v.patient_id = pt.id
-            WHERE v.visit_date = date('now')
+            WHERE v.visit_date = date('now', '+6 hours')
             ORDER BY v.created_at DESC
         """, conn)
         
@@ -2227,7 +2243,7 @@ def show_todays_patients():
                v.is_followup, v.is_report_consultation
         FROM patient_visits v
         JOIN patients p ON v.patient_id = p.id
-        WHERE v.visit_date = date('now')
+        WHERE v.visit_date = date('now', '+6 hours')
         ORDER BY v.consultation_completed ASC, v.created_at ASC
     """, conn)
     
@@ -3022,7 +3038,7 @@ def show_visit_registration():
             existing_visit = pd.read_sql("""
                 SELECT COUNT(*) as count
                 FROM patient_visits 
-                WHERE patient_id = ? AND visit_date = date('now')
+                WHERE patient_id = ? AND visit_date = date('now', '+6 hours')
             """, conn, params=[selected_patient_id])
             conn.close()
             
@@ -3247,7 +3263,7 @@ def show_visit_registration():
                p.date_of_birth, p.allergies, p.medical_conditions, v.notes
         FROM patient_visits v
         JOIN patients p ON v.patient_id = p.id
-        WHERE v.visit_date = date('now') AND v.created_by = ?
+        WHERE v.visit_date = date('now', '+6 hours') AND v.created_by = ?
         ORDER BY v.created_at DESC
     """, conn, params=[st.session_state.user['id']])
     
