@@ -58,22 +58,25 @@ DEMO_USERS = [
     }
 ]
 
-# OpenRouter API Configuration
-OPENROUTER_CONFIG = {
-    'BASE_URL': 'https://openrouter.ai/api/v1/chat/completions',
-    'MODEL': 'anthropic/claude-3-haiku',
-    'MAX_TOKENS': 1000,
+# Replace the existing OPENROUTER_CONFIG with this GROQ_CONFIG
+GROQ_CONFIG = {
+    'BASE_URL': 'https://api.groq.com/openai/v1/chat/completions',
+    'MODEL': 'gemma2-9b-it',
+    'MAX_TOKENS': 2000,
     'TEMPERATURE': 0.1,
-    'TIMEOUT': 30,
-    'RATE_LIMIT_DELAY': 1  # seconds between requests
+    'TIMEOUT': 45,
+    'RATE_LIMIT_DELAY': 1
 }
 
-# AI Analysis Configuration
+# Enhanced AI Analysis Configuration (update this too)
 AI_ANALYSIS_CONFIG = {
     'ENABLE_AI': True,
     'FALLBACK_ENABLED': True,
     'MAX_RETRIES': 3,
-    'RETRY_DELAY': 2  # seconds
+    'RETRY_DELAY': 2,
+    'ENHANCED_DRUG_CLASS_ANALYSIS': True,
+    'USE_DATABASE_DRUG_INFO': True,
+    'API_PROVIDER': 'groq'  # Add this to identify the provider
 }
 
 # Prescription Configuration

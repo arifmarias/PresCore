@@ -17,6 +17,7 @@ import uuid
 from urllib.parse import urlencode
 import os
 import tempfile
+from groq import Groq
 
 # Page configuration
 st.set_page_config(
@@ -660,127 +661,321 @@ class AuthManager:
 
 
 # AI Integration for drug interactions
+# Enhanced AI Integration for drug interactions
+# AI Integration for drug interactions using Groq API
 class AIAnalyzer:
     def __init__(self):
-        # Try to get API key from secrets, fallback to None for graceful degradation
+        # Initialize Groq client
         try:
-            self.api_key = st.secrets.get("openrouter_api_key", None)
-        except:
-            self.api_key = None
-        self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+            self.api_key = "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"
+            self.groq_client = Groq(api_key=self.api_key)
+            self.model = "gemma2-9b-it"
+            self.client_available = True
+            print("Groq client initialized successfully")  # Debug log
+        except Exception as e:
+            print(f"Failed to initialize Groq client: {e}")  # Debug log
+            self.groq_client = None
+            self.client_available = False
     
+    def get_enhanced_medication_data(self, medications):
+        """
+        Get enhanced medication data including drug class information from database
+        """
+        enhanced_meds = []
+        
+        conn = db_manager.get_connection()
+        
+        for med_item in medications:
+            # Extract medication name (remove strength info if present)
+            med_name = med_item['name'].split(' (')[0] if ' (' in med_item['name'] else med_item['name']
+            
+            # Get detailed medication info from database
+            med_data = pd.read_sql("""
+                SELECT name, generic_name, drug_class, contraindications, 
+                       interactions, side_effects, indications
+                FROM medications 
+                WHERE name LIKE ? OR generic_name LIKE ?
+                LIMIT 1
+            """, conn, params=[f"%{med_name}%", f"%{med_name}%"])
+            
+            if not med_data.empty:
+                med_info = med_data.iloc[0]
+                enhanced_med = {
+                    "name": med_item['name'],
+                    "generic_name": med_info['generic_name'] or med_name,
+                    "drug_class": med_info['drug_class'] or "Unknown",
+                    "dosage": med_item['dosage'],
+                    "frequency": med_item['frequency'],
+                    "duration": med_item.get('duration', 'Not specified'),
+                    "known_interactions": med_info['interactions'] or "None documented",
+                    "contraindications": med_info['contraindications'] or "None documented",
+                    "indications": med_info['indications'] or "Not specified"
+                }
+            else:
+                # Fallback if medication not found in database
+                enhanced_med = {
+                    "name": med_item['name'],
+                    "generic_name": med_name,
+                    "drug_class": "Unknown",
+                    "dosage": med_item['dosage'],
+                    "frequency": med_item['frequency'],
+                    "duration": med_item.get('duration', 'Not specified'),
+                    "known_interactions": "Database not available",
+                    "contraindications": "Database not available", 
+                    "indications": "Not specified"
+                }
+            
+            enhanced_meds.append(enhanced_med)
+        
+        conn.close()
+        return enhanced_meds
+
     def analyze_drug_interactions(self, medications, patient_info):
-        if not self.api_key:
-            return self._fallback_analysis(medications, patient_info)
+        if not self.client_available or not self.groq_client:
+            print("Groq client not available, using fallback")  # Debug log
+            return self._enhanced_fallback_analysis(medications, patient_info)
         
         try:
-            # Prepare the prompt
-            medication_list = [f"- {med['name']} ({med['dosage']}, {med['frequency']})" for med in medications]
+            print("Starting Groq API analysis...")  # Debug log
             
-            prompt = f"""
-            Analyze drug interactions for the following prescription:
+            # Get enhanced medication data with drug classes
+            enhanced_medications = self.get_enhanced_medication_data(medications)
             
-            Patient Information:
-            - Age: {patient_info.get('age', 'Unknown')}
-            - Gender: {patient_info.get('gender', 'Unknown')}
-            - Allergies: {patient_info.get('allergies', 'None known')}
-            - Medical Conditions: {patient_info.get('medical_conditions', 'None')}
+            # Create detailed medication list for prompt
+            medication_details = []
+            drug_classes = []
             
-            Medications:
-            {chr(10).join(medication_list)}
-            
-            Please provide a comprehensive analysis in JSON format with the following structure:
-            {{
-                "interactions": [
-                    {{"drugs": ["drug1", "drug2"], "severity": "major|moderate|minor", "description": "...", "recommendation": "..."}}
-                ],
-                "allergies": [
-                    {{"drug": "drug_name", "allergy": "allergy_type", "risk": "description"}}
-                ],
-                "contraindications": [
-                    {{"drug": "drug_name", "condition": "medical_condition", "risk": "description"}}
-                ],
-                "alternatives": [
-                    {{"instead_of": "drug_name", "suggested": "alternative_drug", "reason": "..."}}
-                ],
-                "monitoring": [
-                    {{"parameter": "what_to_monitor", "frequency": "how_often", "reason": "..."}}
-                ],
-                "overall_risk": "low|moderate|high",
-                "summary": "Brief overall assessment"
-            }}
-            """
-            
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "model": "anthropic/claude-3-haiku",
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": 1500,
-                "temperature": 0.1
-            }
-            
-            response = requests.post(self.base_url, headers=headers, json=data, timeout=30)
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result['choices'][0]['message']['content']
+            for med in enhanced_medications:
+                med_detail = f"""
+- **{med['name']}** ({med['generic_name']})
+  - Drug Class: {med['drug_class']}
+  - Dosage: {med['dosage']}, {med['frequency']}, Duration: {med['duration']}
+  - Known Interactions: {med['known_interactions']}
+  - Contraindications: {med['contraindications']}
+  - Indications: {med['indications']}"""
+                medication_details.append(med_detail)
                 
-                # Extract JSON from the response
-                json_start = content.find('{')
-                json_end = content.rfind('}') + 1
-                if json_start != -1 and json_end != 0:
-                    json_content = content[json_start:json_end]
-                    return json.loads(json_content)
+                if med['drug_class'] != "Unknown":
+                    drug_classes.append(med['drug_class'])
             
-            return self._fallback_analysis(medications, patient_info)
+            # Simplified prompt for Llama model
+            prompt = f"""You are a clinical pharmacist AI. Analyze this prescription for drug interactions and safety.
+
+PATIENT: Age {patient_info.get('age', 'Unknown')}, {patient_info.get('gender', 'Unknown')}
+ALLERGIES: {patient_info.get('allergies', 'None')}
+CONDITIONS: {patient_info.get('medical_conditions', 'None')}
+
+MEDICATIONS:
+{chr(10).join(medication_details)}
+
+DRUG CLASSES: {', '.join(set(drug_classes)) if drug_classes else 'Various'}
+
+Provide analysis in this exact JSON format:
+{{
+    "interactions": [
+        {{
+            "drugs": ["drug1", "drug2"],
+            "drug_classes": ["class1", "class2"],
+            "severity": "major|moderate|minor",
+            "description": "interaction description",
+            "recommendation": "clinical recommendation"
+        }}
+    ],
+    "allergies": [
+        {{
+            "drug": "drug_name",
+            "allergy": "allergy_type",
+            "risk": "risk description"
+        }}
+    ],
+    "contraindications": [
+        {{
+            "drug": "drug_name",
+            "condition": "medical_condition",
+            "risk": "risk description"
+        }}
+    ],
+    "monitoring": [
+        {{
+            "parameter": "what_to_monitor",
+            "frequency": "how_often",
+            "reason": "why monitor"
+        }}
+    ],
+    "drug_class_analysis": [
+        {{
+            "drug_class": "class_name",
+            "medications_in_class": ["med1", "med2"],
+            "interaction_potential": "high|moderate|low",
+            "clinical_notes": "important notes"
+        }}
+    ],
+    "overall_risk": "low|moderate|high",
+    "summary": "Brief clinical summary"
+}}
+
+Respond with valid JSON only. No additional text."""
             
+            # Call Groq API using the client
+            chat_completion = self.groq_client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a clinical pharmacist expert. Provide evidence-based drug interaction analysis in valid JSON format only. Do not include any text outside the JSON response."
+                    },
+                    {
+                        "role": "user", 
+                        "content": prompt
+                    }
+                ],
+                model=self.model,
+                temperature=0.1,  # Low temperature for consistent analysis
+                max_tokens=2048,
+                top_p=0.1
+            )
+            
+            # Extract the response content
+            content = chat_completion.choices[0].message.content
+            print(f"Raw Groq response: {content[:200]}...")  # Debug log (first 200 chars)
+            
+            try:
+                # Clean up response to extract JSON
+                content = content.strip()
+                
+                # Remove any markdown formatting if present
+                if content.startswith('```json'):
+                    content = content[7:]
+                if content.endswith('```'):
+                    content = content[:-3]
+                
+                # Find JSON content between curly braces
+                start_idx = content.find('{')
+                end_idx = content.rfind('}') + 1
+                
+                if start_idx != -1 and end_idx != 0:
+                    json_content = content[start_idx:end_idx]
+                    analysis_result = json.loads(json_content)
+                    
+                    # Add metadata about the analysis
+                    analysis_result['analysis_metadata'] = {
+                        'model_used': self.model,
+                        'api_provider': 'groq',
+                        'analysis_timestamp': datetime.datetime.now().isoformat(),
+                        'medications_analyzed': len(enhanced_medications),
+                        'drug_classes_identified': len(set(drug_classes))
+                    }
+                    
+                    print("Successfully parsed Groq response")  # Debug log
+                    return analysis_result
+                else:
+                    print("Could not find valid JSON in response")  # Debug log
+                    st.warning("AI response format issue. Using fallback analysis.")
+                    return self._enhanced_fallback_analysis(enhanced_medications, patient_info)
+                    
+            except json.JSONDecodeError as e:
+                print(f"JSON parsing error: {str(e)}")  # Debug log
+                st.warning(f"JSON parsing error: {str(e)}. Using fallback analysis.")
+                return self._enhanced_fallback_analysis(enhanced_medications, patient_info)
+                
         except Exception as e:
-            st.warning(f"AI analysis unavailable: {str(e)}. Using basic interaction checking.")
-            return self._fallback_analysis(medications, patient_info)
+            print(f"Groq API error: {str(e)}")  # Debug log
+            st.warning(f"AI analysis error: {str(e)}. Using fallback analysis.")
+            return self._enhanced_fallback_analysis(enhanced_medications, patient_info)
     
-    def _fallback_analysis(self, medications, patient_info):
-        """Basic fallback analysis when AI is unavailable"""
+    def _enhanced_fallback_analysis(self, medications, patient_info):
+        """Enhanced fallback analysis when AI is unavailable"""
         interactions = []
         contraindications = []
         monitoring = []
+        drug_class_analysis = []
         
-        # Basic interaction rules
-        med_names = [med['name'].lower() for med in medications]
+        # Get medication data if not already enhanced
+        if isinstance(medications[0], dict) and 'drug_class' not in medications[0]:
+            enhanced_medications = self.get_enhanced_medication_data(medications)
+        else:
+            enhanced_medications = medications
         
-        # Common interaction patterns
+        # Extract drug classes and names
+        drug_classes = [med.get('drug_class', 'Unknown') for med in enhanced_medications]
+        med_names = [med['name'].lower() for med in enhanced_medications]
+        
+        # Enhanced interaction rules based on drug classes
+        class_interactions = {
+            ('ACE Inhibitor', 'Potassium'): {
+                'severity': 'major',
+                'description': 'Risk of hyperkalemia',
+                'recommendation': 'Monitor potassium levels closely'
+            },
+            ('Anticoagulant', 'Anti-inflammatory'): {
+                'severity': 'major', 
+                'description': 'Increased bleeding risk',
+                'recommendation': 'Consider gastroprotection, monitor INR/bleeding'
+            },
+            ('Beta Blocker', 'Calcium Channel Blocker'): {
+                'severity': 'moderate',
+                'description': 'Enhanced hypotensive effect',
+                'recommendation': 'Monitor blood pressure carefully'
+            }
+        }
+        
+        # Check for drug class interactions
+        for i, class1 in enumerate(drug_classes):
+            for j, class2 in enumerate(drug_classes[i+1:], i+1):
+                if class1 != 'Unknown' and class2 != 'Unknown':
+                    interaction_key = tuple(sorted([class1, class2]))
+                    
+                    if interaction_key in class_interactions:
+                        interaction_info = class_interactions[interaction_key]
+                        interactions.append({
+                            "drugs": [enhanced_medications[i]['name'], enhanced_medications[j]['name']],
+                            "drug_classes": [class1, class2],
+                            "severity": interaction_info['severity'],
+                            "description": interaction_info['description'],
+                            "recommendation": interaction_info['recommendation']
+                        })
+        
+        # Specific drug name interactions
         if 'warfarin' in med_names and any('aspirin' in name or 'ibuprofen' in name for name in med_names):
             interactions.append({
                 "drugs": ["Warfarin", "Aspirin/NSAIDs"],
+                "drug_classes": ["Anticoagulant", "Anti-inflammatory"],
                 "severity": "major",
-                "description": "Increased bleeding risk",
+                "description": "Increased bleeding risk due to additive anticoagulant effects",
                 "recommendation": "Monitor INR closely, consider gastroprotection"
             })
         
-        if 'lisinopril' in med_names and 'potassium' in str(medications).lower():
-            interactions.append({
-                "drugs": ["Lisinopril", "Potassium"],
-                "severity": "moderate",
-                "description": "Risk of hyperkalemia",
-                "recommendation": "Monitor potassium levels"
-            })
-        
-        # Check allergies
+        # Check allergies with enhanced data
         allergies = []
         patient_allergies = patient_info.get('allergies', '').lower()
-        if 'penicillin' in patient_allergies:
-            for med in medications:
-                if 'penicillin' in med['name'].lower() or 'amoxicillin' in med['name'].lower():
+        
+        for med in enhanced_medications:
+            # Check for penicillin allergy
+            if 'penicillin' in patient_allergies:
+                if any(term in med['name'].lower() for term in ['penicillin', 'amoxicillin', 'ampicillin']):
                     allergies.append({
                         "drug": med['name'],
                         "allergy": "Penicillin",
-                        "risk": "Allergic reaction possible"
+                        "risk": "Potential allergic reaction - contraindicated"
                     })
+            
+            # Check for sulfa allergy
+            if 'sulfa' in patient_allergies:
+                if 'sulfa' in med['name'].lower() or 'sulfamethoxazole' in med['name'].lower():
+                    allergies.append({
+                        "drug": med['name'],
+                        "allergy": "Sulfa drugs",
+                        "risk": "Potential allergic reaction - contraindicated"
+                    })
+        
+        # Drug class analysis
+        unique_classes = list(set([cls for cls in drug_classes if cls != 'Unknown']))
+        for drug_class in unique_classes:
+            drug_class_analysis.append({
+                "drug_class": drug_class,
+                "medications_in_class": [med['name'] for med in enhanced_medications if med.get('drug_class') == drug_class],
+                "interaction_potential": "moderate",
+                "clinical_notes": f"Monitor for class-specific effects of {drug_class}"
+            })
         
         return {
             "interactions": interactions,
@@ -788,9 +983,20 @@ class AIAnalyzer:
             "contraindications": contraindications,
             "alternatives": [],
             "monitoring": monitoring,
-            "overall_risk": "low" if not interactions and not allergies else "moderate",
-            "summary": f"Basic analysis completed. Found {len(interactions)} interactions and {len(allergies)} allergy concerns."
+            "drug_class_analysis": drug_class_analysis,
+            "overall_risk": "moderate" if interactions or allergies else "low",
+            "summary": f"Enhanced analysis completed. Found {len(interactions)} interactions, {len(allergies)} allergy concerns, and analyzed {len(unique_classes)} drug classes.",
+            "analysis_metadata": {
+                "analysis_type": "fallback",
+                "api_provider": "groq",
+                "medications_analyzed": len(enhanced_medications),
+                "drug_classes_identified": len(unique_classes)
+            }
         }
+
+    def _fallback_analysis(self, medications, patient_info):
+        """Original fallback method - kept for backward compatibility"""
+        return self._enhanced_fallback_analysis(medications, patient_info)
 
 # PDF Generation
 class PDFGenerator:
@@ -944,6 +1150,7 @@ def generate_prescription_id():
     return f"RX-{today}-{random_num:04d}"
 
 def display_ai_analysis(analysis_result):
+    """Enhanced display function for AI analysis results"""
     if not analysis_result or not isinstance(analysis_result, dict):
         st.info("No AI analysis data to display or data is not in the expected format.")
         return
@@ -951,36 +1158,94 @@ def display_ai_analysis(analysis_result):
     st.markdown("<div class='ai-analysis'>", unsafe_allow_html=True)
     st.subheader("🔍 AI Drug Interaction Analysis Results")
 
+    # Display analysis metadata if available
+    metadata = analysis_result.get('analysis_metadata', {})
+    if metadata:
+        with st.expander("ℹ️ Analysis Information", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Model Used:** {metadata.get('model_used', 'Fallback Analysis')}")
+                st.write(f"**Medications Analyzed:** {metadata.get('medications_analyzed', 'N/A')}")
+            with col2:
+                st.write(f"**Drug Classes Identified:** {metadata.get('drug_classes_identified', 'N/A')}")
+                st.write(f"**Analysis Type:** {metadata.get('analysis_type', 'AI-powered')}")
+
     # Overall Risk and Summary
     overall_risk = analysis_result.get('overall_risk', 'N/A').capitalize()
     summary = analysis_result.get('summary', 'No summary provided.')
 
     risk_color_map = {"Low": "green", "Moderate": "orange", "High": "red"}
-    risk_color = risk_color_map.get(overall_risk, "normal") # default to normal if risk level unknown
+    risk_color = risk_color_map.get(overall_risk, "gray")
 
-    st.markdown(f"**Overall Risk:** <span style='color:{risk_color}; font-weight:bold;'>{overall_risk}</span>", unsafe_allow_html=True)
+    st.markdown(f"**Overall Risk:** <span style='color:{risk_color}; font-weight:bold; font-size:1.2em;'>{overall_risk}</span>", unsafe_allow_html=True)
     st.markdown(f"**Summary:** {summary}")
     st.markdown("---")
 
-    # Interactions
+    # Drug Class Analysis (New Section)
+    drug_class_analysis = analysis_result.get('drug_class_analysis', [])
+    if drug_class_analysis:
+        st.markdown("#### 🧬 Drug Class Analysis:")
+        for analysis in drug_class_analysis:
+            if isinstance(analysis, dict):
+                # Handle new enhanced format
+                drug_class = analysis.get('drug_class', 'Unknown')
+                medications = analysis.get('medications_in_class', [])
+                potential = analysis.get('interaction_potential', 'Unknown')
+                notes = analysis.get('clinical_notes', 'No additional notes')
+                
+                with st.expander(f"Drug Class: {drug_class} ({len(medications)} medications)"):
+                    st.write(f"**Medications:** {', '.join(medications)}")
+                    st.write(f"**Interaction Potential:** {potential.title()}")
+                    st.write(f"**Clinical Notes:** {notes}")
+            else:
+                # Handle original format
+                class_combo = analysis.get('class_combination', [])
+                potential = analysis.get('interaction_potential', 'Unknown')
+                common = analysis.get('common_interactions', 'None documented')
+                notes = analysis.get('clinical_notes', 'No notes')
+                
+                with st.expander(f"Class Combination: {' + '.join(class_combo)}"):
+                    st.write(f"**Interaction Potential:** {potential.title()}")
+                    st.write(f"**Common Interactions:** {common}")
+                    st.write(f"**Clinical Notes:** {notes}")
+        st.markdown("---")
+
+    # Enhanced Drug Interactions
     interactions = analysis_result.get('interactions', [])
     if interactions:
-        st.markdown("#### 💊 Drug Interactions:")
+        st.markdown("#### 💊 Drug-Drug Interactions:")
         for item in interactions:
             drugs = ", ".join(item.get('drugs', ['N/A']))
+            drug_classes = item.get('drug_classes', [])
             severity = item.get('severity', 'N/A').capitalize()
             description = item.get('description', 'N/A')
             recommendation = item.get('recommendation', 'N/A')
+            interaction_type = item.get('interaction_type', 'Unknown')
+            mechanism = item.get('mechanism', 'Not specified')
+            clinical_effect = item.get('clinical_effect', 'Not specified')
+            monitoring = item.get('monitoring', 'Standard monitoring')
 
-            exp_title = f"Interaction: {drugs} (Severity: {severity})"
+            severity_color = {"Major": "red", "Moderate": "orange", "Minor": "green"}.get(severity, "gray")
+            
+            exp_title = f"🔄 {drugs} (Severity: {severity})"
             with st.expander(exp_title):
                 st.markdown(f"- **Drugs Involved:** {drugs}")
-                st.markdown(f"- **Severity:** {severity}")
+                if drug_classes:
+                    st.markdown(f"- **Drug Classes:** {', '.join(drug_classes)}")
+                st.markdown(f"- **Severity:** <span style='color:{severity_color}; font-weight:bold;'>{severity}</span>", unsafe_allow_html=True)
+                if interaction_type != 'Unknown':
+                    st.markdown(f"- **Interaction Type:** {interaction_type.title()}")
                 st.markdown(f"- **Description:** {description}")
+                if mechanism != 'Not specified':
+                    st.markdown(f"- **Mechanism:** {mechanism}")
+                if clinical_effect != 'Not specified':
+                    st.markdown(f"- **Clinical Effect:** {clinical_effect}")
                 st.markdown(f"- **Recommendation:** {recommendation}")
+                if monitoring != 'Standard monitoring':
+                    st.markdown(f"- **Monitoring:** {monitoring}")
         st.markdown("---")
 
-    # Allergies
+    # Allergies (Enhanced)
     allergies = analysis_result.get('allergies', [])
     if allergies:
         st.markdown("#### ⚠️ Allergy Concerns:")
@@ -988,51 +1253,70 @@ def display_ai_analysis(analysis_result):
             drug = item.get('drug', 'N/A')
             allergy_type = item.get('allergy', 'N/A')
             risk = item.get('risk', 'N/A')
-            with st.expander(f"Allergy: {drug} with {allergy_type}"):
+            cross_reactivity = item.get('cross_reactivity', 'None identified')
+            
+            with st.expander(f"🚨 Allergy Alert: {drug} with {allergy_type}"):
                 st.markdown(f"- **Drug:** {drug}")
                 st.markdown(f"- **Patient Allergy:** {allergy_type}")
-                st.markdown(f"- **Risk/Note:** {risk}")
+                st.markdown(f"- **Risk Assessment:** {risk}")
+                if cross_reactivity != 'None identified':
+                    st.markdown(f"- **Cross-Reactivity:** {cross_reactivity}")
         st.markdown("---")
 
-    # Contraindications
+    # Enhanced Contraindications
     contraindications = analysis_result.get('contraindications', [])
     if contraindications:
-        st.markdown("#### ⛔ Contraindications (based on patient conditions):")
+        st.markdown("#### ⛔ Contraindications:")
         for item in contraindications:
             drug = item.get('drug', 'N/A')
             condition = item.get('condition', 'N/A')
+            severity = item.get('severity', 'relative')
             risk = item.get('risk', 'N/A')
-            with st.expander(f"Contraindication: {drug} with {condition}"):
+            alternative = item.get('alternative', 'Consult physician')
+            
+            severity_icon = "🚫" if severity == "absolute" else "⚠️"
+            
+            with st.expander(f"{severity_icon} Contraindication: {drug} with {condition}"):
                 st.markdown(f"- **Drug:** {drug}")
                 st.markdown(f"- **Patient Condition:** {condition}")
-                st.markdown(f"- **Risk/Note:** {risk}")
+                st.markdown(f"- **Severity:** {severity.title()}")
+                st.markdown(f"- **Risk:** {risk}")
+                st.markdown(f"- **Alternative:** {alternative}")
         st.markdown("---")
 
-    # Alternatives
+    # Enhanced Alternatives
     alternatives = analysis_result.get('alternatives', [])
     if alternatives:
         st.markdown("#### 🔄 Suggested Alternatives:")
         for item in alternatives:
             instead_of = item.get('instead_of', 'N/A')
             suggested = item.get('suggested', 'N/A')
+            drug_class = item.get('drug_class', 'Same class')
             reason = item.get('reason', 'N/A')
-            with st.expander(f"Alternative for {instead_of}: Suggest {suggested}"):
-                st.markdown(f"- **Original Drug:** {instead_of}")
-                st.markdown(f"- **Suggested Alternative:** {suggested}")
+            considerations = item.get('considerations', 'Standard switching protocol')
+            
+            with st.expander(f"💡 Alternative for {instead_of}: {suggested}"):
+                st.markdown(f"- **Replace:** {instead_of}")
+                st.markdown(f"- **With:** {suggested}")
+                st.markdown(f"- **Drug Class:** {drug_class}")
                 st.markdown(f"- **Reason:** {reason}")
+                st.markdown(f"- **Switching Considerations:** {considerations}")
         st.markdown("---")
 
-    # Monitoring
+    # Enhanced Monitoring
     monitoring = analysis_result.get('monitoring', [])
     if monitoring:
         st.markdown("#### 🔬 Recommended Monitoring:")
         for item in monitoring:
             parameter = item.get('parameter', 'N/A')
             frequency = item.get('frequency', 'N/A')
+            target_range = item.get('target_range', 'As per guidelines')
             reason = item.get('reason', 'N/A')
-            with st.expander(f"Monitor: {parameter} ({frequency})"):
-                st.markdown(f"- **Parameter to Monitor:** {parameter}")
+            
+            with st.expander(f"📊 Monitor: {parameter} ({frequency})"):
+                st.markdown(f"- **Parameter:** {parameter}")
                 st.markdown(f"- **Frequency:** {frequency}")
+                st.markdown(f"- **Target Range:** {target_range}")
                 st.markdown(f"- **Reason:** {reason}")
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -2029,7 +2313,7 @@ def show_create_prescription():
             with col_disp_med:
                 st.markdown(f"• **{med['name']}**: {med['dosage']}, {med['frequency']}, for {med['duration']}. *Instructions: {med['instructions'] or 'N/A'}*")
             with col_disp_action:
-                if st.button(f"Remove##med{i}", key=f"remove_med_{i}"):
+                if st.button(f"Remove", key=f"remove_med_{i}"):
                     st.session_state.prescription_medications.pop(i)
                     st.rerun()
         st.markdown("---")
