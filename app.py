@@ -1081,173 +1081,31 @@ def show_user_management():
                     st.error("Please fill in all required fields!")
 
 # Patient Management
+# Patient Management
 def show_patient_management():
     st.markdown('<div class="main-header"><h1>👤 Patient Management</h1></div>', unsafe_allow_html=True)
     
     # Role check for edit/delete capabilities
     can_manage_patients = st.session_state.user['user_type'] in ['super_admin', 'doctor']
 
-    tab1, tab2 = st.tabs(["View Patients", "Add Patient"])
-    
-    # Replace the "View Patients" tab section in show_patient_management() with this:
+    # Initialize session state for showing the form
+    if 'show_add_patient_form' not in st.session_state:
+        st.session_state.show_add_patient_form = False
 
-    with tab1:
+    # Main header with Add New Patient button
+    col1, col2 = st.columns([3, 1])
+    with col1:
         st.subheader("View and Manage Patients")
+    with col2:
+        if not st.session_state.show_add_patient_form:
+            if st.button("➕ Add New Patient", use_container_width=True, type="primary"):
+                st.session_state.show_add_patient_form = True
+                st.rerun()
 
-        # Role check for edit/delete capabilities
-        can_manage_patients = st.session_state.user['user_type'] in ['super_admin', 'doctor']
-
-        # Filters: Search, Status
-        col_search, col_filter_status = st.columns([2,1])
-        with col_search:
-            search_term = st.text_input("Search patients (name, ID, email, phone)...", key="patient_search")
-        with col_filter_status:
-            patient_status_filter = st.selectbox("Filter by status", ["Active", "Inactive", "All"], key="patient_status_filter", index=0)
-
-        # Pagination settings
-        items_per_page = 10
-        
-        # Initialize page number in session state
-        if 'patient_page' not in st.session_state:
-            st.session_state.patient_page = 1
-
-        # Build query based on status filter
-        query = """
-            SELECT id, patient_id, first_name, last_name, date_of_birth, gender, phone, email, address,
-                allergies, medical_conditions, emergency_contact, insurance_info,
-                created_at, DATETIME(created_at, '+5 hours', '+30 minutes') as created_at_ist, is_active
-            FROM patients
-        """
-        params = []
-
-        if patient_status_filter == "Active":
-            query += " WHERE is_active = 1"
-        elif patient_status_filter == "Inactive":
-            query += " WHERE is_active = 0"
-        # For "All", no WHERE clause for is_active is added initially
-
-        # Apply search term
-        if search_term:
-            like_term = f"%{search_term}%"
-            search_clause = """
-                (first_name LIKE ? OR last_name LIKE ? OR patient_id LIKE ? OR email LIKE ? OR phone LIKE ?)
-            """
-            if "WHERE" in query:
-                query += f" AND {search_clause}"
-            else:
-                query += f" WHERE {search_clause}"
-            params.extend([like_term] * 5)
-
-        query += " ORDER BY created_at DESC"
-
-        conn = db_manager.get_connection()
-        patients_df = pd.read_sql(query, conn, params=params)
-        conn.close()
-
-        if not patients_df.empty:
-            # Calculate pagination
-            total_items = len(patients_df)
-            total_pages = (total_items - 1) // items_per_page + 1
-            
-            # Ensure current page is valid
-            if st.session_state.patient_page > total_pages:
-                st.session_state.patient_page = total_pages
-            if st.session_state.patient_page < 1:
-                st.session_state.patient_page = 1
-            
-            # Calculate start and end indices
-            start_idx = (st.session_state.patient_page - 1) * items_per_page
-            end_idx = min(start_idx + items_per_page, total_items)
-            
-            # Get current page items
-            current_page_patients = patients_df.iloc[start_idx:end_idx]
-            
-            # Display only basic info at top
-            st.info(f"👤 Showing {start_idx + 1}-{end_idx} of {total_items} patients (Page {st.session_state.patient_page} of {total_pages})")
-            
-            # Display patients for current page
-            for index, patient in current_page_patients.iterrows():
-                status_text = "Active" if patient['is_active'] else "Inactive"
-                status_emoji = "✅" if patient['is_active'] else "❌"
-                expander_title = f"👤 {patient['first_name']} {patient['last_name']} ({patient['patient_id']}) {status_emoji} {status_text}"
-
-                with st.expander(expander_title):
-                    if can_manage_patients:
-                        col_details, col_actions = st.columns([3,1])
-                    else:
-                        col_details = st.columns(1)[0]
-                        col_actions = None
-
-                    with col_details:
-                        st.markdown(f"**Internal ID:** {patient['id']}")
-                        st.markdown(f"**DOB:** {patient['date_of_birth']} | **Gender:** {patient['gender']}")
-                        st.markdown(f"**Contact:** {patient['phone']} | {patient['email']}")
-                        st.markdown(f"**Address:** {patient['address']}")
-                        st.markdown(f"**Allergies:** {patient['allergies'] or 'None known'}")
-                        st.markdown(f"**Medical Conditions:** {patient['medical_conditions'] or 'None'}")
-                        st.markdown(f"**Emergency Contact:** {patient['emergency_contact'] or 'N/A'}")
-                        st.markdown(f"**Insurance:** {patient['insurance_info'] or 'N/A'}")
-                        st.caption(f"Registered: {patient['created_at_ist']}")
-
-                    if can_manage_patients and col_actions:
-                        with col_actions:
-                            st.markdown("<br>", unsafe_allow_html=True) # Spacer
-                            if st.button("Edit", key=f"edit_patient_{patient['id']}", use_container_width=True):
-                                st.session_state.edit_patient_id = patient['id']
-
-                            action_button_text = "⚠️ Deactivate" if patient['is_active'] else "✅ Restore"
-                            if st.button(action_button_text, key=f"action_patient_{patient['id']}", use_container_width=True):
-                                st.session_state.action_patient_id = patient['id']
-                                st.session_state.action_patient_current_status = patient['is_active']
-                    
-                    # Prescription history button (visible to super_admin and doctor)
-                    if st.session_state.user['user_type'] in ['doctor', 'super_admin']:
-                        if st.button(f"View Prescription History", key=f"history_{patient['patient_id']}"):
-                            st.session_state.show_prescription_history = patient['patient_id']
-                            st.rerun()
-
-            # Pagination controls at bottom
-            st.markdown("---")
-            
-            # Main pagination controls
-            col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
-            
-            with col1:
-                if st.button("⬅️ Previous", disabled=(st.session_state.patient_page <= 1), key="pt_prev"):
-                    st.session_state.patient_page -= 1
-                    st.rerun()
-            
-            with col2:
-                if st.button("Next ➡️", disabled=(st.session_state.patient_page >= total_pages), key="pt_next"):
-                    st.session_state.patient_page += 1
-                    st.rerun()
-            
-            with col3:
-                st.markdown(f"<div style='text-align: center; font-weight: bold;'>Page {st.session_state.patient_page} of {total_pages}</div>", unsafe_allow_html=True)
-            
-            with col4:
-                # Jump to page
-                target_page = st.number_input("Go to page:", min_value=1, max_value=total_pages, 
-                                            value=st.session_state.patient_page, key="pt_page_jump")
-            
-            with col5:
-                if st.button("Go", key="pt_go_page"):
-                    st.session_state.patient_page = target_page
-                    st.rerun()
-
-        else:
-            st.info("No patients found matching your criteria.")
-
-        # Handle Edit Patient action
-        if 'edit_patient_id' in st.session_state and st.session_state.edit_patient_id:
-            show_edit_patient_form(st.session_state.edit_patient_id)
-
-        # Handle Deactivate/Restore Patient action
-        if 'action_patient_id' in st.session_state and st.session_state.action_patient_id:
-            confirm_and_action_patient(st.session_state.action_patient_id, st.session_state.action_patient_current_status)
-    
-    with tab2:
-        st.subheader("Add New Patient")
+    # Show Add New Patient Form if button was clicked
+    if st.session_state.show_add_patient_form:
+        st.markdown("---")
+        st.markdown("### 📝 Add New Patient")
         
         with st.form("add_patient_form"):
             col1, col2 = st.columns(2)
@@ -1259,7 +1117,7 @@ def show_patient_management():
                             "Date of Birth*",
                             min_value=datetime.date(1960, 1, 1),  # Allow dates from 1960
                             max_value=datetime.date.today(),      # Up to today
-                            value=datetime.date.today()       # Default to 1990
+                            value=datetime.date.today()       # Default to today
                         )
                 gender = st.selectbox("Gender*", ["Male", "Female", "Other"])
                 phone = st.text_input("Phone")
@@ -1272,7 +1130,16 @@ def show_patient_management():
                 emergency_contact = st.text_input("Emergency Contact")
                 insurance_info = st.text_input("Insurance Information")
             
-            submit_button = st.form_submit_button("Add Patient")
+            # Form buttons
+            col1, col2 = st.columns(2)
+            with col1:
+                submit_button = st.form_submit_button("✅ Add Patient", use_container_width=True, type="primary")
+            with col2:
+                cancel_button = st.form_submit_button("❌ Cancel", use_container_width=True)
+            
+            if cancel_button:
+                st.session_state.show_add_patient_form = False
+                st.rerun()
             
             if submit_button:
                 if first_name and last_name and date_of_birth and gender:
@@ -1294,12 +1161,166 @@ def show_patient_management():
                         
                         log_activity(st.session_state.user['id'], 'create_patient', 'patient')
                         st.success(f"Patient added successfully! Patient ID: {patient_id}")
+                        st.session_state.show_add_patient_form = False
                         st.rerun()
                         
                     except Exception as e:
                         st.error(f"Error adding patient: {str(e)}")
                 else:
                     st.error("Please fill in all required fields!")
+        
+        st.markdown("---")
+
+    # Filters: Search, Status (same as before)
+    col_search, col_filter_status = st.columns([2,1])
+    with col_search:
+        search_term = st.text_input("Search patients (name, ID, email, phone)...", key="patient_search")
+    with col_filter_status:
+        patient_status_filter = st.selectbox("Filter by status", ["Active", "Inactive", "All"], key="patient_status_filter", index=0)
+
+    # Pagination settings
+    items_per_page = 10
+    
+    # Initialize page number in session state
+    if 'patient_page' not in st.session_state:
+        st.session_state.patient_page = 1
+
+    # Build query based on status filter
+    query = """
+        SELECT id, patient_id, first_name, last_name, date_of_birth, gender, phone, email, address,
+                allergies, medical_conditions, emergency_contact, insurance_info,
+                created_at, DATETIME(created_at, '+5 hours', '+30 minutes') as created_at_ist, is_active
+        FROM patients
+    """
+    params = []
+
+    if patient_status_filter == "Active":
+        query += " WHERE is_active = 1"
+    elif patient_status_filter == "Inactive":
+        query += " WHERE is_active = 0"
+    # For "All", no WHERE clause for is_active is added initially
+
+    # Apply search term
+    if search_term:
+        like_term = f"%{search_term}%"
+        search_clause = """
+            (first_name LIKE ? OR last_name LIKE ? OR patient_id LIKE ? OR email LIKE ? OR phone LIKE ?)
+        """
+        if "WHERE" in query:
+            query += f" AND {search_clause}"
+        else:
+            query += f" WHERE {search_clause}"
+        params.extend([like_term] * 5)
+
+    query += " ORDER BY created_at DESC"
+
+    conn = db_manager.get_connection()
+    patients_df = pd.read_sql(query, conn, params=params)
+    conn.close()
+
+    if not patients_df.empty:
+        # Calculate pagination
+        total_items = len(patients_df)
+        total_pages = (total_items - 1) // items_per_page + 1
+        
+        # Ensure current page is valid
+        if st.session_state.patient_page > total_pages:
+            st.session_state.patient_page = total_pages
+        if st.session_state.patient_page < 1:
+            st.session_state.patient_page = 1
+        
+        # Calculate start and end indices
+        start_idx = (st.session_state.patient_page - 1) * items_per_page
+        end_idx = min(start_idx + items_per_page, total_items)
+        
+        # Get current page items
+        current_page_patients = patients_df.iloc[start_idx:end_idx]
+        
+        # Display only basic info at top
+        st.info(f"👤 Showing {start_idx + 1}-{end_idx} of {total_items} patients (Page {st.session_state.patient_page} of {total_pages})")
+        
+        # Display patients for current page
+        for index, patient in current_page_patients.iterrows():
+            status_text = "Active" if patient['is_active'] else "Inactive"
+            status_emoji = "✅" if patient['is_active'] else "❌"
+            expander_title = f"👤 {patient['first_name']} {patient['last_name']} ({patient['patient_id']}) {status_emoji} {status_text}"
+
+            with st.expander(expander_title):
+                if can_manage_patients:
+                    col_details, col_actions = st.columns([3,1])
+                else:
+                    col_details = st.columns(1)[0]
+                    col_actions = None
+
+                with col_details:
+                    st.markdown(f"**Internal ID:** {patient['id']}")
+                    st.markdown(f"**DOB:** {patient['date_of_birth']} | **Gender:** {patient['gender']}")
+                    st.markdown(f"**Contact:** {patient['phone']} | {patient['email']}")
+                    st.markdown(f"**Address:** {patient['address']}")
+                    st.markdown(f"**Allergies:** {patient['allergies'] or 'None known'}")
+                    st.markdown(f"**Medical Conditions:** {patient['medical_conditions'] or 'None'}")
+                    st.markdown(f"**Emergency Contact:** {patient['emergency_contact'] or 'N/A'}")
+                    st.markdown(f"**Insurance:** {patient['insurance_info'] or 'N/A'}")
+                    st.caption(f"Registered: {patient['created_at_ist']}")
+
+                if can_manage_patients and col_actions:
+                    with col_actions:
+                        st.markdown("<br>", unsafe_allow_html=True) # Spacer
+                        if st.button("Edit", key=f"edit_patient_{patient['id']}", use_container_width=True):
+                            st.session_state.edit_patient_id = patient['id']
+
+                        action_button_text = "⚠️ Deactivate" if patient['is_active'] else "✅ Restore"
+                        if st.button(action_button_text, key=f"action_patient_{patient['id']}", use_container_width=True):
+                            st.session_state.action_patient_id = patient['id']
+                            st.session_state.action_patient_current_status = patient['is_active']
+                
+                # Prescription history button (visible to super_admin and doctor)
+                if st.session_state.user['user_type'] in ['doctor', 'super_admin']:
+                    if st.button(f"View Prescription History", key=f"history_{patient['patient_id']}"):
+                        st.session_state.show_prescription_history = patient['patient_id']
+                        st.rerun()
+
+        # Pagination controls at bottom
+        st.markdown("---")
+        
+        # Main pagination controls
+        col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+        
+        with col1:
+            if st.button("⬅️ Previous", disabled=(st.session_state.patient_page <= 1), key="pt_prev"):
+                st.session_state.patient_page -= 1
+                st.rerun()
+        
+        with col2:
+            if st.button("Next ➡️", disabled=(st.session_state.patient_page >= total_pages), key="pt_next"):
+                st.session_state.patient_page += 1
+                st.rerun()
+        
+        with col3:
+            st.markdown(f"<div style='text-align: center; font-weight: bold;'>Page {st.session_state.patient_page} of {total_pages}</div>", unsafe_allow_html=True)
+        
+        with col4:
+            # Jump to page
+            target_page = st.number_input("Go to page:", min_value=1, max_value=total_pages, 
+                                        value=st.session_state.patient_page, key="pt_page_jump")
+        
+        with col5:
+            if st.button("Go", key="pt_go_page"):
+                st.session_state.patient_page = target_page
+                st.rerun()
+
+    else:
+        st.info("No patients found matching your criteria.")
+
+    # Handle Edit Patient action
+    if 'edit_patient_id' in st.session_state and st.session_state.edit_patient_id:
+        show_edit_patient_form(st.session_state.edit_patient_id)
+
+    # Handle Deactivate/Restore Patient action
+    if 'action_patient_id' in st.session_state and st.session_state.action_patient_id:
+        confirm_and_action_patient(st.session_state.action_patient_id, st.session_state.action_patient_current_status)
+
+    # Show prescription history if requested
     if 'show_prescription_history' in st.session_state and st.session_state.show_prescription_history:
         st.markdown("---")
         show_patient_prescription_history(st.session_state.show_prescription_history, use_expanders=True)
