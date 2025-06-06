@@ -3026,7 +3026,7 @@ def show_visit_registration():
             """, conn, params=[selected_patient_id])
             conn.close()
             
-            if existing_visit.iloc[0]['count'] > 0:
+            if existing_visit.iloc[0]['count'] > 0: 
                 st.error(f"⚠️ Patient {selected_patient_data['first_name']} {selected_patient_data['last_name']} already has a visit registered for today.")
                 st.info("💡 This patient already appears in today's visits list below.")
                 if st.button("❌ Cancel", type="secondary", key="cancel_duplicate"):

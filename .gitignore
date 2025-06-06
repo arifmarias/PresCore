@@ -8,7 +8,6 @@
 .streamlit/secrets.toml
 
 # Database files
-*.db
 *.sqlite
 *.sqlite3
 
