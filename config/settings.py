@@ -312,7 +312,7 @@ APP_URLS = {
 
 # Feature Flags
 FEATURE_FLAGS = {
-    'ENABLE_AI_ANALYSIS': True,
+    'ENABLE_AI_ANALYSIS': True, 
     'ENABLE_PDF_GENERATION': True,
     'ENABLE_QR_CODES': True,
     'ENABLE_ANALYTICS': True,
