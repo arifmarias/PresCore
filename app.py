@@ -1255,7 +1255,12 @@ def show_patient_management():
             with col1:
                 first_name = st.text_input("First Name*")
                 last_name = st.text_input("Last Name*")
-                date_of_birth = st.date_input("Date of Birth*")
+                date_of_birth = st.date_input(
+                            "Date of Birth*",
+                            min_value=datetime.date(1960, 1, 1),  # Allow dates from 1960
+                            max_value=datetime.date.today(),      # Up to today
+                            value=datetime.date.today()       # Default to 1990
+                        )
                 gender = st.selectbox("Gender*", ["Male", "Female", "Other"])
                 phone = st.text_input("Phone")
                 email = st.text_input("Email")
@@ -1325,7 +1330,12 @@ def show_edit_patient_form(patient_internal_id):
                     dob_val = datetime.datetime.strptime(patient_data['date_of_birth'], '%Y-%m-%d').date()
                 except:
                     dob_val = datetime.date.today() # Fallback, should not happen with good data
-                new_date_of_birth = st.date_input("Date of Birth*", value=dob_val)
+                new_date_of_birth = st.date_input(
+                            "Date of Birth*", 
+                            value=dob_val,
+                            min_value=datetime.date(1960, 1, 1),  # Allow dates from 1900
+                            max_value=datetime.date.today()       # Up to today
+                        )
                 gender_options = ["Male", "Female", "Other"]
                 current_gender_index = gender_options.index(patient_data['gender']) if patient_data['gender'] in gender_options else 0
                 new_gender = st.selectbox("Gender*", gender_options, index=current_gender_index)
@@ -2039,271 +2049,326 @@ def show_templates():
                         st.error(f"Error creating template: {str(e)}")
                 else:
                     st.error("Please provide a template name!")
+
 # Visit Registration (Assistant only)
 def show_visit_registration():
     st.markdown('<div class="main-header"><h1>📋 Visit Registration</h1></div>', unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["Register New Visit", "Today's Registered Visits"])
+    # Initialize tab selection in session state
+    if 'visit_registration_tab' not in st.session_state:
+        st.session_state.visit_registration_tab = "Register New Visit"
     
+    # Create tabs with dynamic selection
+    tab_options = ["Register New Visit", "Today's Registered Visits"]
+    
+    # Create tabs
+    tab1, tab2 = st.tabs(tab_options)
+    
+    # Tab 1: Register New Visit
     with tab1:
-        st.subheader("Register New Patient Visit")
-        
-        # Patient Selection OUTSIDE the form for dynamic updates
-        st.markdown("### 1. Select Patient")
-        
-        # Get active patients with their medical info
-        conn = db_manager.get_connection()
-        patients_df = pd.read_sql("""
-            SELECT id, patient_id, first_name, last_name, date_of_birth, gender, phone,
-                   allergies, medical_conditions
-            FROM patients 
-            WHERE is_active = 1 
-            ORDER BY last_name, first_name
-        """, conn)
-        conn.close()
-        
-        if patients_df.empty:
-            st.error("No active patients found. Please add patients first.")
-            return
-        
-        # Create patient options for selectbox
-        patient_options = {}
-        for _, patient in patients_df.iterrows():
-            age = calculate_age(patient['date_of_birth'])
-            display_name = f"{patient['first_name']} {patient['last_name']} ({patient['patient_id']}) - {age}y, {patient['gender']}"
-            patient_options[display_name] = patient['id']
-        
-        selected_patient_display = st.selectbox(
-            "Select Patient*", 
-            options=list(patient_options.keys()),
-            index=None,
-            placeholder="Choose a patient...",
-            key="patient_selector"
-        )
-        
-        selected_patient_id = None
-        selected_patient_data = None
-        if selected_patient_display:
-            selected_patient_id = patient_options[selected_patient_display]
-            # Get the full patient data for the selected patient
-            selected_patient_data = patients_df[patients_df['id'] == selected_patient_id].iloc[0]
+        # Only show the form if this tab is selected
+        if st.session_state.visit_registration_tab == "Register New Visit":
+            st.subheader("Register New Patient Visit")
             
-            # Display patient medical information
-            st.markdown("### Patient Medical Information")
-            col1, col2 = st.columns(2)
-            with col1:
-                allergies_display = selected_patient_data['allergies'] or 'None known'
-                st.markdown(f"⚠️ **Allergies:** {allergies_display}")
-            with col2:
-                conditions_display = selected_patient_data['medical_conditions'] or 'None'
-                st.markdown(f"🏥 **Medical Conditions:** {conditions_display}")
-            st.markdown("---")
-        else:
-            st.info("Please select a patient to continue.")
-        
-        # Now the form starts AFTER patient selection
-        with st.form("register_visit_form"):
+            # Patient Selection OUTSIDE the form for dynamic updates
+            st.markdown("### 1. Select Patient")
             
-            # Visit Details
-            st.markdown("### 2. Visit Information")
+            # Get active patients with their medical info
+            conn = db_manager.get_connection()
+            patients_df = pd.read_sql("""
+                SELECT id, patient_id, first_name, last_name, date_of_birth, gender, phone,
+                       allergies, medical_conditions
+                FROM patients 
+                WHERE is_active = 1 
+                ORDER BY last_name, first_name
+            """, conn)
+            conn.close()
             
-            col1, col2 = st.columns(2)
+            if patients_df.empty:
+                st.error("No active patients found. Please add patients first.")
+                return
             
-            with col1:
-                visit_date = st.date_input("Visit Date*", value=datetime.date.today())
-                visit_type = st.selectbox("Visit Type*", [
-                    "Initial Consultation",
-                    "Follow-up", 
-                    "Emergency",
-                    "Routine Check-up",
-                    "Vaccination",
-                    "Report Consultation",
-                    "Teleconsultation"
-                ])
+            # Create patient options for selectbox
+            patient_options = {}
+            for _, patient in patients_df.iterrows():
+                age = calculate_age(patient['date_of_birth'])
+                display_name = f"{patient['first_name']} {patient['last_name']} ({patient['patient_id']}) - {age}y, {patient['gender']}"
+                patient_options[display_name] = patient['id']
             
-            with col2:
-                is_followup = st.checkbox("Follow-up Visit")
-                is_report_consultation = st.checkbox("Report Consultation")
-                current_problems = st.text_area("Current Problems/Chief Complaint*", 
-                                               placeholder="Describe the patient's current health concerns...")
+            selected_patient_display = st.selectbox(
+                "Select Patient*", 
+                options=list(patient_options.keys()),
+                index=None,
+                placeholder="Choose a patient...",
+                key="patient_selector"
+            )
             
-            # Vital Signs (Optional)
-            st.markdown("### 3. Vital Signs (Optional)")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                blood_pressure = st.text_input("Blood Pressure", placeholder="e.g., 120/80")
-                temperature = st.number_input("Temperature (°F)", min_value=90.0, max_value=110.0, 
-                                            value=None, step=0.1, placeholder="98.6")
-            
-            with col2:
-                pulse_rate = st.number_input("Pulse Rate (bpm)", min_value=40, max_value=200, 
-                                           value=None, step=1, placeholder="72")
-                respiratory_rate = st.number_input("Respiratory Rate", min_value=8, max_value=40, 
-                                                 value=None, step=1, placeholder="16")
-            
-            with col3:
-                oxygen_saturation = st.number_input("Oxygen Saturation (%)", min_value=70.0, max_value=100.0, 
-                                                   value=None, step=0.1, placeholder="98.0")
-            
-            # Additional vital signs as text (for flexibility)
-            vital_signs_text = st.text_input("Additional Vital Signs", 
-                                           placeholder="e.g., Weight: 70kg, Height: 170cm")
-            
-            # Notes
-            st.markdown("### 4. Additional Notes")
-            notes = st.text_area("Visit Notes", 
-                                placeholder="Any additional observations or notes about the visit...")
-            
-            # Submit button
-            submit_button = st.form_submit_button("📝 Register Visit", use_container_width=True)
-            
-            if submit_button:
-                # Get the selected patient ID from the selectbox outside the form
-                selected_patient_display = st.session_state.get("patient_selector")
-                selected_patient_id = patient_options.get(selected_patient_display) if selected_patient_display else None
+            selected_patient_id = None
+            selected_patient_data = None
+            if selected_patient_display:
+                selected_patient_id = patient_options[selected_patient_display]
+                # Get the full patient data for the selected patient
+                selected_patient_data = patients_df[patients_df['id'] == selected_patient_id].iloc[0]
                 
-                # Validation inside the form submission
-                if not selected_patient_id:
-                    st.error("Please select a patient first.")
-                elif not current_problems.strip():
-                    st.error("Current Problems/Chief Complaint is required.")
-                else:
-                    try:
-                        # Prepare vital signs data
-                        vital_signs_data = []
-                        if blood_pressure:
-                            vital_signs_data.append(f"BP: {blood_pressure}")
-                        if temperature:
-                            vital_signs_data.append(f"Temp: {temperature}°F")
-                        if pulse_rate:
-                            vital_signs_data.append(f"HR: {pulse_rate}")
-                        if respiratory_rate:
-                            vital_signs_data.append(f"RR: {respiratory_rate}")
-                        if oxygen_saturation:
-                            vital_signs_data.append(f"O2 Sat: {oxygen_saturation}%")
-                        if vital_signs_text:
-                            vital_signs_data.append(vital_signs_text)
-                        
-                        vital_signs_combined = ", ".join(vital_signs_data) if vital_signs_data else None
-                        
-                        # Insert visit record
-                        conn = db_manager.get_connection()
-                        cursor = conn.cursor()
-                        
-                        cursor.execute("""
-                            INSERT INTO patient_visits (
-                                patient_id, visit_date, visit_type, current_problems,
-                                is_followup, is_report_consultation, vital_signs,
-                                notes, created_by, consultation_completed
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-                        """, (
-                            selected_patient_id, visit_date.isoformat(),
-                            visit_type, current_problems, is_followup, is_report_consultation,
-                            vital_signs_combined, notes, st.session_state.user['id']
-                        ))
-                        
-                        visit_id = cursor.lastrowid
-                        conn.commit()
-                        conn.close()
-                        
-                        # Log activity
-                        log_activity(
-                            st.session_state.user['id'], 
-                            'create_visit', 
-                            'patient_visit', 
-                            visit_id,
-                            metadata={
-                                'patient_id': selected_patient_id,
-                                'visit_type': visit_type,
-                                'visit_date': visit_date.isoformat()
-                            }
-                        )
-                        
-                        st.success(f"✅ Visit registered successfully! Visit ID: {visit_id}")
-                        st.info(f"Patient {selected_patient_display.split('(')[0].strip()} is now scheduled for {visit_type} on {visit_date.strftime('%B %d, %Y')}")
-                        
-                        # Clear form by rerunning
-                        time.sleep(2)
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"Error registering visit: {str(e)}")
-    
-    with tab2:
-        st.subheader("Today's Registered Visits")
-        
-        # Get today's visits registered by this assistant
-        conn = db_manager.get_connection()
-        
-        todays_visits = pd.read_sql("""
-            SELECT v.id, v.visit_date, v.visit_type, v.current_problems,
-                   v.is_followup, v.is_report_consultation, v.consultation_completed,
-                   v.created_at, p.patient_id, p.first_name, p.last_name, p.gender,
-                   p.date_of_birth, p.allergies, p.medical_conditions
-            FROM patient_visits v
-            JOIN patients p ON v.patient_id = p.id
-            WHERE v.visit_date = date('now') AND v.created_by = ?
-            ORDER BY v.created_at ASC
-        """, conn, params=[st.session_state.user['id']])
-        
-        conn.close()
-        
-        if not todays_visits.empty:
-            st.info(f"📊 You have registered {len(todays_visits)} visits for today")
+                # Display patient medical information as editable fields
+                st.markdown("### Patient Medical Information")
+                col1, col2 = st.columns(2)
+                with col1:
+                    current_allergies = selected_patient_data['allergies'] or ''
+                    st.text_input("⚠️ Allergies", value=current_allergies, key="visit_allergies", 
+                                 help="Update patient allergies if needed")
+                with col2:
+                    current_conditions = selected_patient_data['medical_conditions'] or ''
+                    st.text_input("🏥 Medical Conditions", value=current_conditions, key="visit_conditions",
+                                 help="Update patient medical conditions if needed")
+                st.markdown("---")
+            else:
+                st.info("Please select a patient to continue.")
             
-            for _, visit in todays_visits.iterrows():
-                age = calculate_age(visit['date_of_birth'])
-                status_icon = "✅" if visit['consultation_completed'] else "⏳"
-                status_text = "Completed" if visit['consultation_completed'] else "Waiting"
+            # Now the form starts AFTER patient selection
+            with st.form("register_visit_form"):
+                # Visit Details
+                st.markdown("### 2. Visit Information")
                 
-                with st.expander(f"{status_icon} {visit['first_name']} {visit['last_name']} - {visit['visit_type']} ({status_text})"):
-                    col1, col2 = st.columns([3, 1])
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    visit_date = st.date_input("Visit Date*", value=datetime.date.today())
+                    visit_type = st.selectbox("Visit Type*", [
+                        "Initial Consultation",
+                        "Follow-up", 
+                        "Emergency",
+                        "Routine Check-up",
+                        "Vaccination",
+                        "Report Consultation",
+                        "Teleconsultation"
+                    ])
+                
+                with col2:
+                    is_followup = st.checkbox("Follow-up Visit")
+                    is_report_consultation = st.checkbox("Report Consultation")
+                    current_problems = st.text_area("Current Problems/Chief Complaint*", 
+                                                   placeholder="Describe the patient's current health concerns...")
+                
+                # Vital Signs (Optional)
+                st.markdown("### 3. Vital Signs (Optional)")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    blood_pressure = st.text_input("Blood Pressure", placeholder="e.g., 120/80")
+                    temperature = st.number_input("Temperature (°F)", min_value=90.0, max_value=110.0, 
+                                                value=None, step=0.1, placeholder="98.6")
+                
+                with col2:
+                    pulse_rate = st.number_input("Pulse Rate (bpm)", min_value=40, max_value=200, 
+                                               value=None, step=1, placeholder="72")
+                    respiratory_rate = st.number_input("Respiratory Rate", min_value=8, max_value=40, 
+                                                     value=None, step=1, placeholder="16")
+                
+                with col3:
+                    oxygen_saturation = st.number_input("Oxygen Saturation (%)", min_value=70.0, max_value=100.0, 
+                                                       value=None, step=0.1, placeholder="98.0")
+                
+                # Additional vital signs as text (for flexibility)
+                vital_signs_text = st.text_input("Additional Vital Signs", 
+                                               placeholder="e.g., Weight: 70kg, Height: 170cm")
+                
+                # Notes
+                st.markdown("### 4. Additional Notes")
+                notes = st.text_area("Visit Notes", 
+                                    placeholder="Any additional observations or notes about the visit...")
+                
+                # Submit button
+                submit_button = st.form_submit_button("📝 Register Visit", use_container_width=True)
+                
+                if submit_button:
+                    # Get the selected patient ID from the selectbox outside the form
+                    selected_patient_display = st.session_state.get("patient_selector")
+                    selected_patient_id = patient_options.get(selected_patient_display) if selected_patient_display else None
                     
-                    with col1:
-                        st.markdown(f"**Patient:** {visit['first_name']} {visit['last_name']} ({visit['patient_id']})")
-                        st.markdown(f"**Age/Gender:** {age} years, {visit['gender']}")
-                        st.markdown(f"**Visit Type:** {visit['visit_type']}")
-                        st.markdown(f"**Visit Date:** {visit['visit_date']}")
-                        
-                        if visit['is_followup']:
-                            st.markdown("🔄 **Follow-up Visit**")
-                        if visit['is_report_consultation']:
-                            st.markdown("📋 **Report Consultation**")
-                        st.markdown(f"**Registered:** {visit['created_at'][:16]}")
-                        
-                        st.markdown(f"**Current Problems:** {visit['current_problems']}")
-                        
-                        # Display allergies and medical conditions
-                        if visit['allergies']:
-                            st.markdown(f"⚠️ **Allergies:** {visit['allergies']}")
-                        
-                        if visit['medical_conditions']:
-                            st.markdown(f"🏥 **Medical Conditions:** {visit['medical_conditions']}")
-                    
-                    # Action buttons column (only for waiting visits)
-                    with col2:
-                        if not visit['consultation_completed']:
-                            st.markdown("**Actions:**")
-                            
-                            if st.button("✏️ Edit", key=f"edit_visit_{visit['id']}", use_container_width=True):
-                                st.session_state.edit_visit_id = visit['id']
-                                st.rerun()
-                            
-                            if st.button("🗑️ Cancel Visit", key=f"cancel_visit_{visit['id']}", use_container_width=True, type="secondary"):
-                                st.session_state.cancel_visit_id = visit['id']
-                                st.session_state.cancel_visit_patient = f"{visit['first_name']} {visit['last_name']}"
-                                st.rerun()
-                    
-                    # Status display
-                    if visit['consultation_completed']:
-                        st.success("✅ Consultation completed by doctor")
+                    # Validation inside the form submission
+                    if not selected_patient_id:
+                        st.error("Please select a patient first.")
+                    elif not current_problems.strip():
+                        st.error("Current Problems/Chief Complaint is required.")
                     else:
-                        st.info("⏳ Waiting for doctor consultation")
+                        try:
+                            # Get updated allergies and conditions from the input fields
+                            updated_allergies = st.session_state.get("visit_allergies", "")
+                            updated_conditions = st.session_state.get("visit_conditions", "")
+                            
+                            # Prepare vital signs data
+                            vital_signs_data = []
+                            if blood_pressure:
+                                vital_signs_data.append(f"BP: {blood_pressure}")
+                            if temperature:
+                                vital_signs_data.append(f"Temp: {temperature}°F")
+                            if pulse_rate:
+                                vital_signs_data.append(f"HR: {pulse_rate}")
+                            if respiratory_rate:
+                                vital_signs_data.append(f"RR: {respiratory_rate}")
+                            if oxygen_saturation:
+                                vital_signs_data.append(f"O2 Sat: {oxygen_saturation}%")
+                            if vital_signs_text:
+                                vital_signs_data.append(vital_signs_text)
+                            
+                            vital_signs_combined = ", ".join(vital_signs_data) if vital_signs_data else None
+                            
+                            # Start database transaction
+                            conn = db_manager.get_connection()
+                            cursor = conn.cursor()
+                            
+                            # Update patient allergies and conditions if they've changed
+                            selected_patient_data = patients_df[patients_df['id'] == selected_patient_id].iloc[0]
+                            if updated_allergies != (selected_patient_data['allergies'] or '') or \
+                               updated_conditions != (selected_patient_data['medical_conditions'] or ''):
+                                cursor.execute("""
+                                    UPDATE patients 
+                                    SET allergies = ?, medical_conditions = ?, updated_at = CURRENT_TIMESTAMP
+                                    WHERE id = ?
+                                """, (updated_allergies or None, updated_conditions or None, selected_patient_id))
+                            
+                            # Insert visit record
+                            cursor.execute("""
+                                INSERT INTO patient_visits (
+                                    patient_id, visit_date, visit_type, current_problems,
+                                    is_followup, is_report_consultation, vital_signs,
+                                    notes, created_by, consultation_completed
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                            """, (
+                                selected_patient_id, visit_date.isoformat(),
+                                visit_type, current_problems, is_followup, is_report_consultation,
+                                vital_signs_combined, notes, st.session_state.user['id']
+                            ))
+                            
+                            visit_id = cursor.lastrowid
+                            conn.commit()
+                            conn.close()
+                            
+                            # Log activity
+                            log_activity(
+                                st.session_state.user['id'], 
+                                'create_visit', 
+                                'patient_visit', 
+                                visit_id,
+                                metadata={
+                                    'patient_id': selected_patient_id,
+                                    'visit_type': visit_type,
+                                    'visit_date': visit_date.isoformat(),
+                                    'updated_medical_info': bool(updated_allergies != (selected_patient_data['allergies'] or '') or 
+                                                                   updated_conditions != (selected_patient_data['medical_conditions'] or ''))
+                                }
+                            )
+                            
+                            success_message = f"✅ Visit registered successfully! Visit ID: {visit_id}"
+                            if updated_allergies != (selected_patient_data['allergies'] or '') or \
+                               updated_conditions != (selected_patient_data['medical_conditions'] or ''):
+                                success_message += "\n✅ Patient medical information updated."
+                            
+                            st.success(success_message)
+                            st.info(f"Patient {selected_patient_display.split('(')[0].strip()} is now scheduled for {visit_type} on {visit_date.strftime('%B %d, %Y')}")
+                            
+                            # Clear form fields and redirect to Today's Registered Visits tab
+                            if 'patient_selector' in st.session_state:
+                                del st.session_state.patient_selector
+                            if 'visit_allergies' in st.session_state:
+                                del st.session_state.visit_allergies
+                            if 'visit_conditions' in st.session_state:
+                                del st.session_state.visit_conditions
+                            
+                            st.info("🔄 Redirecting to Today's Registered Visits...")
+                            time.sleep(2)
+                            
+                            # Set session state to switch to the second tab
+                            st.session_state.visit_registration_tab = "Today's Registered Visits"
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"Error registering visit: {str(e)}")
         else:
-            st.info("No visits registered for today yet.")
-            st.markdown("Use the 'Register New Visit' tab above to add patient visits.")
+            # Show message when tab is not active
+            st.info("Click on 'Register New Visit' tab to register a new patient visit.")
+    
+    # Tab 2: Today's Registered Visits  
+    with tab2:
+        # Only show content if this tab is selected or after redirect
+        if st.session_state.visit_registration_tab == "Today's Registered Visits":
+            st.subheader("Today's Registered Visits")
+            
+            # Get today's visits registered by this assistant
+            conn = db_manager.get_connection()
+            
+            todays_visits = pd.read_sql("""
+                SELECT v.id, v.visit_date, v.visit_type, v.current_problems,
+                       v.is_followup, v.is_report_consultation, v.consultation_completed,
+                       v.created_at, p.patient_id, p.first_name, p.last_name, p.gender,
+                       p.date_of_birth, p.allergies, p.medical_conditions
+                FROM patient_visits v
+                JOIN patients p ON v.patient_id = p.id
+                WHERE v.visit_date = date('now') AND v.created_by = ?
+                ORDER BY v.created_at ASC
+            """, conn, params=[st.session_state.user['id']])
+            
+            conn.close()
+            
+            if not todays_visits.empty:
+                st.info(f"📊 You have registered {len(todays_visits)} visits for today")
+                
+                for _, visit in todays_visits.iterrows():
+                    age = calculate_age(visit['date_of_birth'])
+                    status_icon = "✅" if visit['consultation_completed'] else "⏳"
+                    status_text = "Completed" if visit['consultation_completed'] else "Waiting"
+                    
+                    with st.expander(f"{status_icon} {visit['first_name']} {visit['last_name']} - {visit['visit_type']} ({status_text})"):
+                        col1, col2 = st.columns([3, 1])
+                        
+                        with col1:
+                            st.markdown(f"**Patient:** {visit['first_name']} {visit['last_name']} ({visit['patient_id']})")
+                            st.markdown(f"**Age/Gender:** {age} years, {visit['gender']}")
+                            st.markdown(f"**Visit Type:** {visit['visit_type']}")
+                            st.markdown(f"**Visit Date:** {visit['visit_date']}")
+                            
+                            if visit['is_followup']:
+                                st.markdown("🔄 **Follow-up Visit**")
+                            if visit['is_report_consultation']:
+                                st.markdown("📋 **Report Consultation**")
+                            st.markdown(f"**Registered:** {visit['created_at'][:16]}")
+                            
+                            st.markdown(f"**Current Problems:** {visit['current_problems']}")
+                            
+                            # Display allergies and medical conditions
+                            if visit['allergies']:
+                                st.markdown(f"⚠️ **Allergies:** {visit['allergies']}")
+                            
+                            if visit['medical_conditions']:
+                                st.markdown(f"🏥 **Medical Conditions:** {visit['medical_conditions']}")
+                        
+                        # Action buttons column (only for waiting visits)
+                        with col2:
+                            if not visit['consultation_completed']:
+                                st.markdown("**Actions:**")
+                                
+                                if st.button("✏️ Edit", key=f"edit_visit_{visit['id']}", use_container_width=True):
+                                    st.session_state.edit_visit_id = visit['id']
+                                    st.rerun()
+                                
+                                if st.button("🗑️ Cancel Visit", key=f"cancel_visit_{visit['id']}", use_container_width=True, type="secondary"):
+                                    st.session_state.cancel_visit_id = visit['id']
+                                    st.session_state.cancel_visit_patient = f"{visit['first_name']} {visit['last_name']}"
+                                    st.rerun()
+                        
+                        # Status display
+                        if visit['consultation_completed']:
+                            st.success("✅ Consultation completed by doctor")
+                        else:
+                            st.info("⏳ Waiting for doctor consultation")
+            else:
+                st.info("No visits registered for today yet.")
+                st.markdown("Use the 'Register New Visit' tab above to add patient visits.")
+        else:
+            # Show message when tab is not active
+            st.info("Click on 'Today's Registered Visits' tab to view registered visits.")
     
     # Handle edit visit action
     if 'edit_visit_id' in st.session_state and st.session_state.edit_visit_id:
@@ -2417,7 +2482,6 @@ def show_cancel_visit_confirmation(visit_id, patient_name):
             del st.session_state.cancel_visit_id
             del st.session_state.cancel_visit_patient
             st.rerun()
-
 
 def apply_template(template_data):
     """Apply template to current prescription"""
