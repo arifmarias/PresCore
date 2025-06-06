@@ -2393,17 +2393,17 @@ def show_visit_registration():
                     st.success("✅ Consultation completed by doctor")
                 else:
                     st.info("⏳ Waiting for doctor consultation")
+            
+            # Show Edit Visit form right after this patient if it's being edited
+            if 'edit_visit_id' in st.session_state and st.session_state.edit_visit_id == visit['id']:
+                show_edit_visit_form(st.session_state.edit_visit_id)
+            
+            # Show Cancel Visit confirmation right after this patient if it's being cancelled
+            if 'cancel_visit_id' in st.session_state and st.session_state.cancel_visit_id == visit['id']:
+                show_cancel_visit_confirmation(st.session_state.cancel_visit_id, st.session_state.cancel_visit_patient)
     else:
         st.info("No visits registered for today yet.")
         st.markdown("Click the **'➕ Add New Visit'** button above to register your first patient visit for today.")
-    
-    # Handle edit visit action
-    if 'edit_visit_id' in st.session_state and st.session_state.edit_visit_id:
-        show_edit_visit_form(st.session_state.edit_visit_id)
-    
-    # Handle cancel visit action
-    if 'cancel_visit_id' in st.session_state and st.session_state.cancel_visit_id:
-        show_cancel_visit_confirmation(st.session_state.cancel_visit_id, st.session_state.cancel_visit_patient)
 
 def show_edit_visit_form(visit_id):
     """Show form to edit a visit"""
