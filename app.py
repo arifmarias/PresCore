@@ -2326,6 +2326,15 @@ def show_visit_registration():
         st.markdown("---")
     
     # Always show Today's Registered Visits
+    # Search and Filter Section (same as Patient Management)
+    col_search, col_filter_status, col_filter_type = st.columns([2, 1, 1])
+    with col_search:
+        search_term = st.text_input("Search visits (patient name, ID, problems, notes)...", key="visit_search")
+    with col_filter_status:
+        status_filter = st.selectbox("Filter by status", ["All", "Waiting", "Completed"], key="visit_status_filter", index=0)
+    with col_filter_type:
+        type_filter = st.selectbox("Filter by visit type", ["All", "Initial Consultation", "Follow-up", "Emergency", "Routine Check-up", "Vaccination", "Report Consultation", "Teleconsultation"], key="visit_type_filter", index=0)
+    
     # Get today's visits registered by this assistant
     conn = db_manager.get_connection()
     
@@ -2333,7 +2342,7 @@ def show_visit_registration():
         SELECT v.id, v.visit_date, v.visit_type, v.current_problems,
                v.is_followup, v.is_report_consultation, v.consultation_completed,
                v.created_at, p.patient_id, p.first_name, p.last_name, p.gender,
-               p.date_of_birth, p.allergies, p.medical_conditions
+               p.date_of_birth, p.allergies, p.medical_conditions, v.notes
         FROM patient_visits v
         JOIN patients p ON v.patient_id = p.id
         WHERE v.visit_date = date('now') AND v.created_by = ?
@@ -2342,10 +2351,89 @@ def show_visit_registration():
     
     conn.close()
     
-    if not todays_visits.empty:
-        st.info(f"📊 You have registered {len(todays_visits)} visits for today")
+    # Apply filters
+    filtered_visits = todays_visits.copy()
+    
+    # Apply search filter
+    if search_term:
+        search_term_lower = search_term.lower()
+        filtered_visits = filtered_visits[
+            filtered_visits['first_name'].str.lower().str.contains(search_term_lower, na=False) |
+            filtered_visits['last_name'].str.lower().str.contains(search_term_lower, na=False) |
+            filtered_visits['patient_id'].str.lower().str.contains(search_term_lower, na=False) |
+            filtered_visits['current_problems'].str.lower().str.contains(search_term_lower, na=False) |
+            filtered_visits['notes'].str.lower().str.contains(search_term_lower, na=False, regex=False)
+        ]
+    
+    # Apply status filter
+    if status_filter == "Waiting":
+        filtered_visits = filtered_visits[filtered_visits['consultation_completed'] == 0]
+    elif status_filter == "Completed":
+        filtered_visits = filtered_visits[filtered_visits['consultation_completed'] == 1]
+    
+    # Apply visit type filter
+    if type_filter != "All":
+        filtered_visits = filtered_visits[filtered_visits['visit_type'] == type_filter]
+    
+    if not filtered_visits.empty:
+        # Pagination settings
+        # Initialize page size in session state
+        if 'visits_page_size' not in st.session_state:
+            st.session_state.visits_page_size = 5
         
-        for _, visit in todays_visits.iterrows():
+        # Initialize page number in session state
+        if 'visits_page' not in st.session_state:
+            st.session_state.visits_page = 1
+        
+        # Calculate pagination with current page size
+        items_per_page = st.session_state.visits_page_size
+        total_items = len(filtered_visits)
+        total_pages = (total_items - 1) // items_per_page + 1 if items_per_page > 0 else 1
+        
+        # Ensure current page is valid
+        if st.session_state.visits_page > total_pages:
+            st.session_state.visits_page = total_pages
+        if st.session_state.visits_page < 1:
+            st.session_state.visits_page = 1
+        
+        # Calculate start and end indices
+        start_idx = (st.session_state.visits_page - 1) * items_per_page
+        end_idx = min(start_idx + items_per_page, total_items)
+        
+        # Get current page items
+        current_page_visits = filtered_visits.iloc[start_idx:end_idx]
+        
+        # Display pagination info and controls at the top
+        col_info, col_controls = st.columns([3, 1])
+        with col_info:
+            if search_term or status_filter != "All" or type_filter != "All":
+                st.info(f"📊 Showing {start_idx + 1}-{end_idx} of {total_items} filtered visits (Page {st.session_state.visits_page} of {total_pages})")
+            else:
+                st.info(f"📊 Showing {start_idx + 1}-{end_idx} of {total_items} visits (Page {st.session_state.visits_page} of {total_pages})")
+        with col_controls:
+            # Page size selector (same style as Patient Management)
+            page_size_options = [5, 10, 15, 20]
+            current_index = page_size_options.index(st.session_state.visits_page_size) if st.session_state.visits_page_size in page_size_options else 0
+            
+            st.selectbox("Per page:", page_size_options, 
+                        index=current_index,
+                        key="visits_page_size_selector",
+                        label_visibility="collapsed")
+            
+            # Update page size if changed (without rerun)
+            new_page_size = st.session_state.get("visits_page_size_selector", st.session_state.visits_page_size)
+            if new_page_size != st.session_state.visits_page_size:
+                st.session_state.visits_page_size = new_page_size
+                # Reset to page 1 when page size changes
+                st.session_state.visits_page = 1
+                # Recalculate with new values
+                total_pages = (total_items - 1) // new_page_size + 1 if new_page_size > 0 else 1
+                start_idx = 0
+                end_idx = min(new_page_size, total_items)
+                current_page_visits = filtered_visits.iloc[start_idx:end_idx]
+        
+        # Display visits for current page
+        for _, visit in current_page_visits.iterrows():
             age = calculate_age(visit['date_of_birth'])
             status_icon = "✅" if visit['consultation_completed'] else "⏳"
             status_text = "Completed" if visit['consultation_completed'] else "Waiting"
@@ -2401,9 +2489,44 @@ def show_visit_registration():
             # Show Cancel Visit confirmation right after this patient if it's being cancelled
             if 'cancel_visit_id' in st.session_state and st.session_state.cancel_visit_id == visit['id']:
                 show_cancel_visit_confirmation(st.session_state.cancel_visit_id, st.session_state.cancel_visit_patient)
+        
+        # Pagination controls at the bottom (same style as Patient Management)
+        if total_pages > 1:
+            st.markdown("---")
+            
+            # Clean pagination controls like Patient Management
+            col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+            
+            with col1:
+                if st.button("⬅️ Previous", disabled=(st.session_state.visits_page <= 1), key="visits_prev", use_container_width=True):
+                    st.session_state.visits_page -= 1
+                    st.rerun()
+            
+            with col2:
+                if st.button("Next ➡️", disabled=(st.session_state.visits_page >= total_pages), key="visits_next", use_container_width=True):
+                    st.session_state.visits_page += 1
+                    st.rerun()
+            
+            with col3:
+                st.markdown(f"<div style='text-align: center; font-weight: bold; padding-top: 8px;'>Page {st.session_state.visits_page} of {total_pages}</div>", unsafe_allow_html=True)
+            
+            with col4:
+                # Jump to page input
+                target_page = st.number_input("Go to page:", min_value=1, max_value=total_pages, 
+                                            value=st.session_state.visits_page, key="visits_page_jump",
+                                            label_visibility="collapsed")
+            
+            with col5:
+                if st.button("Go", key="visits_go_page", use_container_width=True):
+                    st.session_state.visits_page = target_page
+                    st.rerun()
     else:
-        st.info("No visits registered for today yet.")
-        st.markdown("Click the **'➕ Add New Visit'** button above to register your first patient visit for today.")
+        if search_term or status_filter != "All" or type_filter != "All":
+            st.info("No visits found matching your search criteria.")
+            st.markdown("Try adjusting your search terms or filters, or click **'➕ Add New Visit'** to register a new patient visit.")
+        else:
+            st.info("No visits registered for today yet.")
+            st.markdown("Click the **'➕ Add New Visit'** button above to register your first patient visit for today.")
 
 def show_edit_visit_form(visit_id):
     """Show form to edit a visit"""
