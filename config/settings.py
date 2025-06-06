@@ -5,6 +5,10 @@ This file contains all configuration settings, constants, and application parame
 
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Application Information
 APP_NAME = "MedScript Pro"
@@ -12,9 +16,34 @@ APP_VERSION = "1.0.0"
 APP_DESCRIPTION = "Medical Prescription Management System"
 APP_AUTHOR = "MedScript Development Team"
 
+# Environment Configuration
+APP_ENV = os.getenv('APP_ENV', 'development')
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+
 # Database Configuration
-DATABASE_NAME = "medscript_pro.db"
+DATABASE_NAME = os.getenv('DATABASE_NAME', 'medscript_pro.db')
 DATABASE_PATH = os.path.join(os.getcwd(), DATABASE_NAME)
+
+# Groq API Configuration (loaded from environment variables)
+GROQ_CONFIG = {
+    'API_KEY': os.getenv('GROQ_API_KEY'),
+    'MODEL': os.getenv('GROQ_MODEL', 'gemma2-9b-it'),
+    'MAX_TOKENS': int(os.getenv('GROQ_MAX_TOKENS', '2048')),
+    'TEMPERATURE': float(os.getenv('GROQ_TEMPERATURE', '0.1')),
+    'TIMEOUT': int(os.getenv('GROQ_TIMEOUT', '45')),
+    'RATE_LIMIT_DELAY': 1
+}
+
+# Enhanced AI Analysis Configuration
+AI_ANALYSIS_CONFIG = {
+    'ENABLE_AI': True,
+    'FALLBACK_ENABLED': True,
+    'MAX_RETRIES': 3,
+    'RETRY_DELAY': 2,
+    'ENHANCED_DRUG_CLASS_ANALYSIS': True,
+    'USE_DATABASE_DRUG_INFO': True,
+    'API_PROVIDER': 'groq'
+}
 
 # User Roles
 USER_ROLES = {
@@ -57,27 +86,6 @@ DEMO_USERS = [
         'phone': '+1234567892'
     }
 ]
-
-# Replace the existing OPENROUTER_CONFIG with this GROQ_CONFIG
-GROQ_CONFIG = {
-    'BASE_URL': 'https://api.groq.com/openai/v1/chat/completions',
-    'MODEL': 'gemma2-9b-it',
-    'MAX_TOKENS': 2000,
-    'TEMPERATURE': 0.1,
-    'TIMEOUT': 45,
-    'RATE_LIMIT_DELAY': 1
-}
-
-# Enhanced AI Analysis Configuration (update this too)
-AI_ANALYSIS_CONFIG = {
-    'ENABLE_AI': True,
-    'FALLBACK_ENABLED': True,
-    'MAX_RETRIES': 3,
-    'RETRY_DELAY': 2,
-    'ENHANCED_DRUG_CLASS_ANALYSIS': True,
-    'USE_DATABASE_DRUG_INFO': True,
-    'API_PROVIDER': 'groq'  # Add this to identify the provider
-}
 
 # Prescription Configuration
 PRESCRIPTION_CONFIG = {
@@ -255,7 +263,8 @@ ERROR_MESSAGES = {
     'DATABASE_ERROR': 'Database operation failed. Please try again.',
     'API_ERROR': 'External service temporarily unavailable',
     'VALIDATION_ERROR': 'Please check your input and try again',
-    'FILE_UPLOAD_ERROR': 'File upload failed. Please check file size and format.'
+    'FILE_UPLOAD_ERROR': 'File upload failed. Please check file size and format.',
+    'GROQ_API_KEY_MISSING': 'Groq API key is not configured. Please check your environment variables.'
 }
 
 # Success Messages

@@ -27,3 +27,5 @@ requests
 python-dateutil
 
 groq
+
+python-dotenv

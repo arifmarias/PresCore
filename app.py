@@ -19,6 +19,13 @@ import os
 import tempfile
 from groq import Groq
 
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
+# Import configuration settings
+from config.settings import GROQ_CONFIG, ERROR_MESSAGES
+
 # Page configuration
 st.set_page_config(
     page_title="MedScript Pro",
@@ -663,17 +670,36 @@ class AuthManager:
 # AI Integration for drug interactions
 # Enhanced AI Integration for drug interactions
 # AI Integration for drug interactions using Groq API
+# AI Integration for drug interactions using Groq API
+# AI Integration for drug interactions using Groq API
 class AIAnalyzer:
     def __init__(self):
-        # Initialize Groq client
+        # Import settings to get configuration
+        from config.settings import GROQ_CONFIG, ERROR_MESSAGES
+        
+                    # Initialize Groq client with environment variables
         try:
-            self.api_key = "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"
+            self.api_key = GROQ_CONFIG.get('API_KEY')
+            
+            if not self.api_key:
+                print("Warning: Groq API key not found in environment variables")
+                st.warning("⚠️ AI Analysis disabled: API key not configured")
+                self.groq_client = None
+                self.client_available = False
+                return
+            
+            # Initialize Groq client with just the API key (uses default Groq endpoint)
             self.groq_client = Groq(api_key=self.api_key)
-            self.model = "gemma2-9b-it"
+            self.model = GROQ_CONFIG.get('MODEL', 'gemma2-9b-it')
+            self.max_tokens = GROQ_CONFIG.get('MAX_TOKENS', 2048)
+            self.temperature = GROQ_CONFIG.get('TEMPERATURE', 0.1)
+            self.timeout = GROQ_CONFIG.get('TIMEOUT', 45)
             self.client_available = True
             print("Groq client initialized successfully")  # Debug log
+            
         except Exception as e:
             print(f"Failed to initialize Groq client: {e}")  # Debug log
+            st.error(f"AI Analysis initialization failed: {str(e)}")
             self.groq_client = None
             self.client_available = False
     
@@ -729,7 +755,7 @@ class AIAnalyzer:
         
         conn.close()
         return enhanced_meds
-    # ----
+        
     def analyze_drug_interactions(self, medications, patient_info):
         if not self.client_available or not self.groq_client:
             print("Groq client not available, using fallback")  # Debug log
@@ -871,9 +897,10 @@ class AIAnalyzer:
                     }
                 ],
                 model=self.model,
-                temperature=0.1,  # Low temperature for consistent analysis
-                max_tokens=2048,
-                top_p=0.1
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                top_p=0.1,
+                timeout=self.timeout
             )
             
             # Extract the response content
