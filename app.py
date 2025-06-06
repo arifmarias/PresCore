@@ -2497,6 +2497,7 @@ def show_patient_visit_history(patient_db_id):
         st.info("No visit history found for this patient")
     
     conn.close()
+
 # Create Prescription (Doctor only)
 def show_create_prescription():
     st.markdown('<div class="main-header"><h1>📝 Create Prescription</h1></div>', unsafe_allow_html=True)
